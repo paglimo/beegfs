@@ -30,7 +30,7 @@ static const struct SocketOps rdmaOps = {
    .recvT = _RDMASocket_recvT,
 };
 
-bool RDMASocket_init(RDMASocket* this, struct in_addr src, NicAddressStats* nicStats)
+bool RDMASocket_init(RDMASocket* this, int domain, struct in6_addr src, NicAddressStats* nicStats)
 {
    Socket* thisBase = (Socket*)this;
 
@@ -48,7 +48,7 @@ bool RDMASocket_init(RDMASocket* this, struct in_addr src, NicAddressStats* nicS
    this->commCfg.fragmentSize = RDMASOCKET_DEFAULT_FRAGMENT_SIZE;
    this->commCfg.keyType = RDMASocket_toIBVSocketKeyType(RDMASOCKET_DEFAULT_KEY_TYPE);
 
-   if(!IBVSocket_init(&this->ibvsock, src, nicStats) )
+   if(!IBVSocket_init(&this->ibvsock, domain, src, nicStats) )
       goto err_ibv;
 
    return true;
@@ -58,12 +58,12 @@ err_ibv:
    return false;
 }
 
-RDMASocket* RDMASocket_construct(struct in_addr src, NicAddressStats *nicStats)
+RDMASocket* RDMASocket_construct(int sockDomain, struct in6_addr src, NicAddressStats *nicStats)
 {
    RDMASocket* this = kmalloc(sizeof(*this), GFP_NOFS);
 
    if(!this ||
-      !RDMASocket_init(this, src, nicStats) )
+      !RDMASocket_init(this, sockDomain, src, nicStats) )
    {
       kfree(this);
       return NULL;
@@ -89,7 +89,7 @@ bool RDMASocket_rdmaDevicesExist(void)
 #endif
 }
 
-bool _RDMASocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigned short port)
+bool _RDMASocket_connectByIP(Socket* this, struct in6_addr ipaddress, unsigned short port)
 {
    // note: does not set the family type to the one of this socket.
 
@@ -103,9 +103,9 @@ bool _RDMASocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigned sh
    {
       // note: this message would flood the log if hosts are unreachable on the primary interface
 
-      //char* ipStr = SocketTk_ipaddrToStr(ipaddress);
+      //char ipStr[SOCKET_IPADDRSTR_LEN];
+      //SocketTk_ipaddrToStr(ipStr, sizeof ipStr, ipaddress);
       //printk_fhgfs(KERN_WARNING, "RDMASocket failed to connect to %s.\n", ipStr);
-      //kfree(ipStr);
 
       return false;
    }
@@ -115,14 +115,14 @@ bool _RDMASocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigned sh
    // set peername if not done so already (e.g. by connect(hostname) )
    if(!this->peername[0])
    {
-      SocketTk_endpointAddrToStrNoAlloc(this->peername, SOCKET_PEERNAME_LEN, ipaddress, port);
+      SocketTk_endpointToStr(this->peername, sizeof this->peername, ipaddress, port);
       this->peerIP = ipaddress;
    }
 
    return true;
 }
 
-bool _RDMASocket_bindToAddr(Socket* this, struct in_addr ipaddress, unsigned short port)
+bool _RDMASocket_bindToAddr(Socket* this, struct in6_addr ipaddress, unsigned short port)
 {
    RDMASocket* thisCast = (RDMASocket*)this;
 
@@ -131,7 +131,6 @@ bool _RDMASocket_bindToAddr(Socket* this, struct in_addr ipaddress, unsigned sho
    bindRes = IBVSocket_bindToAddr(&thisCast->ibvsock, ipaddress, port);
    if(!bindRes)
    {
-      //printk_fhgfs_debug(KERN_INFO, "Failed to bind RDMASocket.\n"); // debug in
       return false;
    }
 
@@ -153,7 +152,7 @@ bool _RDMASocket_listen(Socket* this)
       return false;
    }
 
-   snprintf(this->peername, SOCKET_PEERNAME_LEN, "Listen(Port: %u)", this->boundPort);
+   snprintf(this->peername, sizeof this->peername, "Listen(Port: %u)", this->boundPort);
 
    return true;
 }
@@ -202,7 +201,7 @@ ssize_t _RDMASocket_recvT(Socket* this, struct iov_iter* iter, int flags, int ti
  * @param flags ignored
  */
 ssize_t _RDMASocket_sendto(Socket* this, struct iov_iter* iter, int flags,
-   fhgfs_sockaddr_in *to)
+   struct sockaddr_in6 *to)
 {
    RDMASocket* thisCast = (RDMASocket*)this;
 

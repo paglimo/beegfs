@@ -34,6 +34,7 @@
 #endif
 
 #include <common/FhgfsTypes.h>
+#include <common/net/sock/IpAddress.h>
 #include <os/OsDeps.h>
 
 /**
@@ -109,37 +110,20 @@
 
 
 #ifdef LOG_DEBUG_MESSAGES
-
-#define printk_fhgfs_debug(levelStr, fmtStr, ...) \
-   printk(levelStr BEEGFS_MODULE_NAME_STR ": " "%s(%u): " fmtStr, current->comm, \
-      (unsigned)current->pid, ## __VA_ARGS__)
-
-
-#define printk_fhgfs_ir_debug(levelStr, fmtStr, ...) \
-   printk_fhgfs_ir(levelStr, fmtStr, ## __VA_ARGS__)
-
-#define BEEGFS_BUG_ON_DEBUG(condition, msgStr)   BEEGFS_BUG_ON(condition, msgStr)
-
-#else // !LOG_DEBUG_MESSAGES
-
-#define printk_fhgfs_debug(levelStr, fmtStr, ...) \
-   do { /* nothing */ } while(0)
-
-#define printk_fhgfs_ir_debug(levelStr, fmtStr, ...) \
-   do { /* nothing */ } while(0)
-
-#define BEEGFS_BUG_ON_DEBUG(condition, msgStr) \
-   do { /* nothing */ } while(0)
-
-#endif // LOG_DEBUG_MESSAGES
+   #define printk_fhgfs_debug(...) printk_fhgfs(__VA_ARGS__)
+   #define printk_fhgfs_ir_debug(...) printk_fhgfs_ir(__VA_ARGS__)
+   #define BEEGFS_BUG_ON_DEBUG(...) BEEGFS_BUG_ON(__VA_ARGS__)
+#else
+   #define printk_fhgfs_debug(...)
+   #define printk_fhgfs_ir_debug(...)
+   #define BEEGFS_BUG_ON_DEBUG(...)
+#endif
 
 #ifdef BEEGFS_OPENTK_LOG_CONN_ERRORS
-   #define printk_fhgfs_connerr(levelStr, fmtStr, ...) \
-      printk_fhgfs(levelStr, fmtStr, ## __VA_ARGS__)
+   #define printk_fhgfs_connerr(...) printk_fhgfs(__VA_ARGS__)
 #else
-   #define printk_fhgfs_connerr(levelStr, fmtStr, ...) /* logging of conn errors disabled */
-#endif // BEEGFS_OPENTK_LOG_CONN_ERRORS
-
+   #define printk_fhgfs_connerr(...)
+#endif
 
 // this macro mutes warnings about unused variables
 #define IGNORE_UNUSED_VARIABLE(a)   do{ if( ((long)a)==1) {} } while(0)

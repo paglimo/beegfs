@@ -5,7 +5,9 @@
 #include <common/app/log/LogContext.h>
 
 #include "RoutingTable.h"
-
+#include "common/net/sock/IPAddress.h"
+#include <netinet/in.h>
+#include <set>
 #include <arpa/inet.h>
 
 #include <netlink/netlink.h>
@@ -16,8 +18,27 @@
 #include <netlink/route/nexthop.h>
 #include <net/if.h>
 #include <ifaddrs.h>
+#include <sys/socket.h>
 
-typedef std::unordered_map<int, std::set<struct in_addr>> InterfaceMap;
+
+typedef std::unordered_map<int, std::set<IPAddress>> InterfaceMap;
+
+IPAddress makeIPAdress(const nl_addr* ra) {
+
+   void* ba = ::nl_addr_get_binary_addr(ra);
+   sa_family_t family = ::nl_addr_get_family(ra);
+
+   if (family == AF_INET)
+   {
+      auto addr = reinterpret_cast<in_addr*>(ba);
+      return IPAddress(*addr);
+   } else if (family == AF_INET6) {
+      auto addr = reinterpret_cast<in6_addr*>(ba);
+      return IPAddress(*addr);
+   }
+
+   return IPAddress();
+}
 
 /**
  * Destnet indicates which local NIC IPs to use for a particular
@@ -27,40 +48,39 @@ class Destnet
 {
    private:
       // net represents the destination network
-      IPv4Network        net;
+      IPNetwork        net;
       // sources contains the local NIC IPs that have a route to "net"
-      std::set<struct in_addr> sources;
+      std::set<IPAddress> sources;
 
    public:
 
       Destnet() {}
 
-      Destnet(const IPv4Network& net)
-         : net(net) {}
+      Destnet(const IPNetwork& net) : net(net) {}
 
-      BEEGFS_NODISCARD const IPv4Network& getNet() const
+      BEEGFS_NODISCARD const IPNetwork& getNet() const
       {
          return net;
       }
 
-      void addSource(struct in_addr a)
+      void addSource(const IPAddress& a)
       {
          sources.insert(a);
       }
 
-      BEEGFS_NODISCARD const std::set<struct in_addr>& getSources() const
+      BEEGFS_NODISCARD const std::set<IPAddress>& getSources() const
       {
          return sources;
       }
 
       // match() indicates if the passed address is in "net"
-      BEEGFS_NODISCARD bool match(struct in_addr a) const
+      BEEGFS_NODISCARD bool isInNetwork(const IPAddress& a) const
       {
-         return net.matches(a);
+         return net.containsAddress(a);
       }
 
       // hasSource() indicates if the passed address is in "sources"
-      BEEGFS_NODISCARD bool hasSource(struct in_addr addr) const
+      BEEGFS_NODISCARD bool hasSource(const IPAddress& addr) const
       {
          return sources.find(addr) != sources.end();
       }
@@ -70,22 +90,6 @@ class Destnet
          return net == o.net &&
             sources == o.sources;
       }
-
-      /**
-       * Used for debugging.
-       */
-      BEEGFS_NODISCARD std::string dump() const
-      {
-         std::string res = "Destnet";
-         res += std::string(" address=") + Socket::ipaddrToStr(net.address.s_addr)
-            + "/" + StringTk::uintToStr(net.prefix);
-         for (auto s: sources)
-         {
-            res += std::string(" ") + Socket::ipaddrToStr(s.s_addr);
-         }
-         return res;
-      }
-
 };
 
 /**
@@ -158,9 +162,11 @@ class Nl3RouteQuery : public RoutingTableQuery
               no = ::nl_cache_get_next(no))
          {
             struct rtnl_addr* raddr = reinterpret_cast<struct rtnl_addr*>(no);
-            struct in_addr ba;
-            if (addrTo_in_addr(raddr, ba))
-               interfaces[::rtnl_addr_get_ifindex(raddr)].insert(ba);
+
+            struct nl_addr* na = ::rtnl_addr_get_local(raddr);
+            auto addr = makeIPAdress(na);
+            if (!addr.isZero())
+               interfaces[::rtnl_addr_get_ifindex(raddr)].insert(addr);
          }
       }
 
@@ -171,24 +177,23 @@ class Nl3RouteQuery : public RoutingTableQuery
               no = ::nl_cache_get_next(no))
          {
             struct rtnl_route* re = reinterpret_cast<struct rtnl_route*>(no);
-            if (::rtnl_route_get_family(re) == AF_INET &&
+            uint8_t family = rtnl_route_get_family(re);
+            if ((family == AF_INET || family == AF_INET6) &&
                ::rtnl_route_get_type(re) == RTN_UNICAST)
             {
                struct nl_addr* dstaddr = ::rtnl_route_get_dst(re);
-               struct in_addr dstnetaddr;
-               if (!addrTo_in_addr(dstaddr, dstnetaddr))
+               auto key = makeIPAdress(dstaddr);
+               if (key.isZero())
                   continue;
                int dstpref = ::nl_addr_get_prefixlen(dstaddr);
-               struct in_addr key = {
-                  .s_addr = dstnetaddr.s_addr & IPv4Network::generateNetmask(dstpref).s_addr
-               };
 
                auto s = dests.find(key);
                Destnet* t;
                if (s == dests.end())
                {
                   t = &(dests[key]);
-                  *t = Destnet(IPv4Network(dstnetaddr, dstpref));
+                  // LOG(GENERAL, WARNING, "CCCC ", key.toString(), dstpref);
+                  *t = Destnet(IPNetwork(key, dstpref));
                }
                else
                {
@@ -198,9 +203,16 @@ class Nl3RouteQuery : public RoutingTableQuery
                struct nl_addr* prefsrc = ::rtnl_route_get_pref_src(re);
                if (prefsrc)
                {
-                  struct in_addr sa;
-                  if (addrTo_in_addr(prefsrc, sa))
-                     t->addSource(sa);
+                  auto addr = makeIPAdress(prefsrc);
+                  if (family == AF_INET) {
+                     if (!addr.isZero() && addr.isIPv4()) {
+                        t->addSource(addr);
+                     }
+                  } else if (family == AF_INET6) {
+                     if (!addr.isZero() && addr.isIPv6()) {
+                        t->addSource(addr);
+                     }
+                  }
                }
                else
                {
@@ -212,8 +224,13 @@ class Nl3RouteQuery : public RoutingTableQuery
                      if (nh)
                      {
                         int ifn = ::rtnl_route_nh_get_ifindex(nh);
-                        for (auto& ns : interfaces[ifn])
-                           t->addSource(ns);
+                        for (auto& addr : interfaces[ifn]) {
+                           if (family == AF_INET && addr.isIPv4()) {
+                              t->addSource(addr);
+                           } else if (family == AF_INET6 && addr.isIPv6()) {
+                              t->addSource(addr);
+                           }
+                        }
                      }
                   }
                }
@@ -281,13 +298,13 @@ public:
 };
 
 RoutingTable::RoutingTable(std::shared_ptr<const DestnetMap> destnets,
-                           std::shared_ptr<const NetVector> noDefaultRouteNets)
+                           std::shared_ptr<const NetFilter> noDefaultRouteNets)
    : destnets(destnets),
      noDefaultRouteNets(noDefaultRouteNets)
 {
 }
 
-bool RoutingTable::findSource(const Destnet* dn, const NicAddressList& nicList, struct in_addr& addr) const
+bool RoutingTable::findSource(const Destnet* dn, const NicAddressList& nicList, IPAddress& addr) const
 {
    LogContext log("RoutingTable (findSource)");
    //log.log(Log_DEBUG, dn->dump());
@@ -304,7 +321,7 @@ bool RoutingTable::findSource(const Destnet* dn, const NicAddressList& nicList, 
    return false;
 }
 
-bool RoutingTable::match(struct in_addr addr, const NicAddressList& nicList, struct in_addr& src) const
+bool RoutingTable::match(const IPAddress& addr, const NicAddressList& nicList, IPAddress& src) const
 {
    LogContext log("RoutingTable (match)");
    const Destnet* defaultRoute = NULL;
@@ -317,12 +334,12 @@ bool RoutingTable::match(struct in_addr addr, const NicAddressList& nicList, str
    for (auto ds = destnets->begin(); ds != destnets->end(); ds++)
    {
       auto* d = &ds->second;
-      if (d->getNet().address.s_addr == 0)
+      if (d->getNet().isDefaultNetwork())
          defaultRoute = d;
       else
       {
-         //log.log(Log_DEBUG, std::string("addr=") + Socket::ipaddrToStr(addr) + " net=" + Socket::ipaddrToStr(d->getNet().address.s_addr));
-         if (d->match(addr) && findSource(d, nicList, src))
+         // log.log(Log_WARNING, std::string("addr=") + addr.toString() + " net=" + d->getNet().data().toString() + " isInNet=" + (d->isInNetwork(addr) ? "Y" : "N") + " prefix=" + (int)d->getNet().getPrefix());
+         if (d->isInNetwork(addr) && findSource(d, nicList, src))
             return true;
       }
    }
@@ -333,7 +350,7 @@ bool RoutingTable::match(struct in_addr addr, const NicAddressList& nicList, str
       {
          for (auto& n : *noDefaultRouteNets)
          {
-            if (n.matches(addr))
+            if (n.containsAddress(addr)) // XXX
                return false;
          }
       }
@@ -373,7 +390,7 @@ bool RoutingTableFactory::load()
    return changed;
 }
 
-RoutingTable RoutingTableFactory::create(std::shared_ptr<const NetVector> noDefaultRouteNets)
+RoutingTable RoutingTableFactory::create(std::shared_ptr<const NetFilter> noDefaultRouteNets)
 {
    LogContext log("RoutingTableFactory (create)");
    log.log(Log_DEBUG, "");
@@ -398,7 +415,7 @@ bool RoutingTable::loadIpSourceMap(const NicAddressList& nicList, const NicAddre
    srcMap.clear();
    for (auto& s : nicList)
    {
-      struct in_addr src;
+      IPAddress src;
       if (match(s.ipAddr, localNicList, src))
          srcMap[s.ipAddr] = src;
    }
@@ -409,15 +426,16 @@ bool RoutingTable::loadIpSourceMap(const NicAddressList& nicList, const NicAddre
       for (auto& s : nicList)
       {
          nics += std::string(" ") + s.name;
-         ips += std::string(" ") + Socket::ipaddrToStr(s.ipAddr.s_addr);
+         ips += std::string(" ") + s.ipAddr.toString();
       }
       log.log(Log_ERR, std::string("No routes found ") + " nicList: [" + nics +
          " ] ipList: [" + ips + " ] localNicList.size: " +
-         StringTk::intToStr(static_cast<int>(localNicList.size())));
+         StringTk::intToStr((int)(localNicList.size())));
    }
    else
       result = true;
 
    return result;
 }
+
 

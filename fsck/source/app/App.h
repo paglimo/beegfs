@@ -1,13 +1,13 @@
 #ifndef APP_H_
 #define APP_H_
 
+#include "common/net/sock/IPAddress.h"
 #include <app/config/Config.h>
 #include <common/app/log/LogContext.h>
 #include <common/app/log/Logger.h>
 #include <common/app/AbstractApp.h>
 #include <common/nodes/NodeStore.h>
 #include <common/toolkit/AcknowledgmentStore.h>
-#include <common/toolkit/NetFilter.h>
 #include <common/toolkit/NodesTk.h>
 #include <common/Common.h>
 #include <common/components/worker/Worker.h>
@@ -72,8 +72,8 @@ class App : public AbstractApp
       Config* cfg;
       LogContext* log;
 
-      NetFilter* netFilter;
-      NetFilter* tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
+      NetFilter netFilter;
+      NetFilter tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
       std::list<std::string> allowedInterfaces;
 
       std::shared_ptr<Node> localNode;
@@ -129,12 +129,12 @@ class App : public AbstractApp
 
       virtual const NetFilter* getNetFilter() const override
       {
-         return netFilter;
+         return &netFilter;
       }
 
       virtual const NetFilter* getTcpOnlyFilter() const override
       {
-         return tcpOnlyFilter;
+         return &tcpOnlyFilter;
       }
 
       Config* getConfig() const

@@ -1,23 +1,21 @@
 #pragma once
 
-#include <common/net/message/storage/chunkbalancing/ChunkBalanceMsg.h>
-#include <common/net/message/storage/chunkbalancing/ChunkBalanceRespMsg.h>
-
+#include <common/net/message/storage/chunkbalancing/StartChunkBalanceMsg.h>
+#include <common/net/message/storage/chunkbalancing/StartChunkBalanceRespMsg.h>
+#include <components/chunkbalancer/ChunkBalancerJob.h>
 #include <net/message/MirroredMessage.h>
 #include <session/EntryLock.h>
 
-class ChunkBalancerJob;
-
-class ChunkBalanceMsgResponseState : public ErrorCodeResponseState<ChunkBalanceRespMsg, NETMSGTYPE_ChunkBalance>
+class StartChunkBalanceMsgResponseState : public ErrorCodeResponseState<StartChunkBalanceRespMsg, NETMSGTYPE_StartChunkBalance>
 {
    public:
 
-      ChunkBalanceMsgResponseState() : ErrorCodeResponseState<ChunkBalanceRespMsg, NETMSGTYPE_ChunkBalance>(FhgfsOpsErr_INTERNAL)
+      StartChunkBalanceMsgResponseState() : ErrorCodeResponseState<StartChunkBalanceRespMsg, NETMSGTYPE_StartChunkBalance>(FhgfsOpsErr_INTERNAL)
       {
       }
 
-      ChunkBalanceMsgResponseState(ChunkBalanceMsgResponseState&& other) :
-        ErrorCodeResponseState<ChunkBalanceRespMsg, NETMSGTYPE_ChunkBalance>(other.result)
+      StartChunkBalanceMsgResponseState(StartChunkBalanceMsgResponseState&& other) :
+        ErrorCodeResponseState<StartChunkBalanceRespMsg, NETMSGTYPE_StartChunkBalance>(other.result)
       {
       }
 
@@ -37,10 +35,10 @@ class ChunkBalanceMsgResponseState : public ErrorCodeResponseState<ChunkBalanceR
       FhgfsOpsErr result;
 };
 
-class ChunkBalanceMsgEx : public MirroredMessage<ChunkBalanceMsg, FileIDLock>
+class StartChunkBalanceMsgEx : public MirroredMessage<StartChunkBalanceMsg, FileIDLock>
 {
    public:
-      typedef ChunkBalanceMsgResponseState ResponseState;  
+      typedef StartChunkBalanceMsgResponseState ResponseState;  
       
       virtual bool processIncoming(ResponseContext& ctx) override;
  
@@ -50,8 +48,8 @@ class ChunkBalanceMsgEx : public MirroredMessage<ChunkBalanceMsg, FileIDLock>
       FileIDLock lock(EntryLockStore& store) override;
       bool isMirrored() override { return getEntryInfo()->getIsBuddyMirrored(); }
 
+
    private: 
-      Mutex ChunkBalanceJobMutex;
       ChunkBalancerJob* addChunkBalanceJob();
 
       void forwardToSecondary(ResponseContext& ctx) override {}; 
@@ -59,7 +57,6 @@ class ChunkBalanceMsgEx : public MirroredMessage<ChunkBalanceMsg, FileIDLock>
       {
          return FhgfsOpsErr_SUCCESS;    
       }
-      const char* mirrorLogContext() const override { return "ChunkBalanceMsgEx/forward"; } 
+      const char* mirrorLogContext() const override { return "StartChunkBalanceMsgEx/forward"; } 
 
 };
-

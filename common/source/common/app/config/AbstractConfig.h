@@ -105,3 +105,4 @@ class AbstractConfig : public ICommonConfig
 
 };
 
+NetFilter loadNetworkList(const std::string& file);

@@ -18,7 +18,7 @@ static inline void RefreshTargetStatesMsgEx_init(RefreshTargetStatesMsgEx* this)
 // virtual functions
 extern bool RefreshTargetStatesMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx);
 extern bool __RefreshTargetStatesMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 
 // getters & setters
 static inline const char* RefreshTargetStatesMsgEx_getAckID(RefreshTargetStatesMsgEx* this);

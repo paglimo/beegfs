@@ -38,14 +38,14 @@ add_library(
 	./source/net/message/nodes/GetNodeCapacityPoolsMsgEx.cpp
 	./source/net/message/nodes/RefreshCapacityPoolsMsgEx.cpp
 	./source/net/message/nodes/GetTargetMappingsMsgEx.h
-	./source/net/message/nodes/GetClientStatsMsgEx.h
+	./source/net/message/nodes/GetClientStatsV2MsgEx.h
 	./source/net/message/nodes/MapTargetsMsgEx.cpp
 	./source/net/message/nodes/RefreshTargetStatesMsgEx.cpp
 	./source/net/message/nodes/storagepools/RefreshStoragePoolsMsgEx.h
 	./source/net/message/nodes/storagepools/RefreshStoragePoolsMsgEx.cpp
 	./source/net/message/nodes/HeartbeatMsgEx.cpp
 	./source/net/message/nodes/HeartbeatRequestMsgEx.h
-	./source/net/message/nodes/GetClientStatsMsgEx.cpp
+	./source/net/message/nodes/GetClientStatsV2MsgEx.cpp
 	./source/net/message/nodes/GetTargetMappingsMsgEx.cpp
 	./source/net/message/nodes/PublishCapacitiesMsgEx.h
 	./source/net/message/nodes/GenericDebugMsgEx.cpp
@@ -132,7 +132,7 @@ add_library(
 	./source/net/message/storage/lookup/FindLinkOwnerMsgEx.h
 	./source/net/message/storage/lookup/LookupIntentMsgEx.cpp
 	./source/net/message/storage/chunkbalancing/ChunkBalanceMsgEx.cpp
-	./source/net/message/storage/chunkbalancing/StripePatternUpdateMsgEx.cpp
+	./source/net/message/storage/chunkbalancing/UpdateStripePatternMsgEx.cpp
 	./source/net/message/storage/StatStoragePathMsgEx.h
 	./source/net/message/storage/StatStoragePathMsgEx.cpp
 	./source/net/message/storage/listing/ListDirFromOffsetMsgEx.h
@@ -209,6 +209,8 @@ add_library(
 	./source/components/worker/UnlinkChunkFileWork.h
 	./source/components/worker/BarrierWork.h
 	./source/components/worker/CloseChunkFileWork.h
+	./source/components/worker/CopyChunkFileWork.h
+	./source/components/worker/CopyChunkFileWork.cpp
 	./source/components/worker/GetChunkFileAttribsWork.h
 	./source/components/worker/UnlinkChunkFileWork.cpp
 	./source/components/worker/TruncChunkFileWork.cpp
@@ -235,6 +237,9 @@ add_library(
 	./source/components/buddyresyncer/BuddyResyncerModSyncSlave.h
 	./source/components/buddyresyncer/BuddyResyncerModSyncSlave.cpp
 	./source/components/buddyresyncer/BuddyResyncer.h
+	./source/components/chunkbalancer/ChunkBalancerJob.cpp
+	./source/components/chunkbalancer/ChunkBalancerMetaSlave.cpp
+	./source/components/chunkbalancer/SyncCandidate.h
 	./source/session/LockingNotifier.cpp
 	./source/session/EntryLock.h
 	./source/session/EntryLockStore.cpp
@@ -259,6 +264,8 @@ add_library(
 	./source/app/config/Config.cpp
 	./source/nodes/MetaNodeOpStats.h
 	./source/storage/DirInode.h
+	./source/storage/GlobalInodeLockStore.h
+	./source/storage/GlobalInodeLockStore.cpp
 	./source/storage/IncompleteInode.cpp
 	./source/storage/MetadataEx.h
 	./source/storage/Locking.h

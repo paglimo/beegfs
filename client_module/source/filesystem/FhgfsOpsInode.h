@@ -167,15 +167,9 @@ extern int FhgfsOps_setattr(struct dentry* dentry, struct iattr* iattr);
 #endif
 
 extern ssize_t FhgfsOps_listxattr(struct dentry* dentry, char* value, size_t size);
-#ifdef KERNEL_HAS_DENTRY_XATTR_HANDLER
-extern ssize_t FhgfsOps_getxattr(struct dentry* dentry, const char* name, void* value, size_t size);
-extern int FhgfsOps_setxattr(struct dentry* dentry, const char* name, const void* value,
-      size_t size, int flags);
-#else
 extern ssize_t FhgfsOps_getxattr(struct inode* inode, const char* name, void* value, size_t size);
 extern int FhgfsOps_setxattr(struct inode* inode, const char* name, const void* value,
       size_t size, int flags);
-#endif // KERNEL_HAS_DENTRY_XATTR_HANDLER
 extern int FhgfsOps_removexattr(struct dentry* dentry, const char* name);
 extern int FhgfsOps_removexattrInode(struct inode* inode, const char* name);
 

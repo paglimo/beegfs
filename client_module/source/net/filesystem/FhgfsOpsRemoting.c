@@ -60,7 +60,6 @@
 #include <common/storage/StorageErrors.h>
 #include <common/toolkit/MathTk.h>
 #include <common/toolkit/MetadataTk.h>
-#include <common/FhgfsTypes.h>
 #include <common/toolkit/ackstore/AcknowledgmentStore.h>
 #include <common/Common.h>
 #include <net/filesystem/FhgfsOpsRemoting.h>

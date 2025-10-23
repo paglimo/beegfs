@@ -5,6 +5,7 @@
 #include <common/threading/PThread.h>
 #include <app/App.h>
 
+class ChunkBalancerJob;
 class DirEntry;
 
 class SyncSlaveBase : public PThread
@@ -27,7 +28,8 @@ class SyncSlaveBase : public PThread
       }
 
    protected:
-      BuddyResyncJob* parentJob;
+      BuddyResyncJob* BuddyResyncParentJob;
+      ChunkBalancerJob* ChunkBalancerParentJob;
 
       NumNodeID buddyNodeID;
 
@@ -42,7 +44,12 @@ class SyncSlaveBase : public PThread
 
       SyncSlaveBase(const std::string& threadName, BuddyResyncJob& parentJob,
             const NumNodeID buddyNodeID):
-         PThread(threadName), parentJob(&parentJob), buddyNodeID(buddyNodeID), isRunning(false)
+         PThread(threadName), BuddyResyncParentJob(&parentJob), buddyNodeID(buddyNodeID), isRunning(false)
+      {
+      }
+
+      SyncSlaveBase(const std::string& threadName, ChunkBalancerJob& parentJob):
+         PThread(threadName), ChunkBalancerParentJob(&parentJob), isRunning(false)
       {
       }
 

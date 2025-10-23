@@ -16,6 +16,7 @@ bool ResyncLocalFileMsgEx::processIncoming(ResponseContext& ctx)
 
    const char* dataBuf = getDataBuf();
    uint16_t targetID = getResyncToTargetID();
+   uint16_t secondaryTargetID = 0; 
    size_t count = getCount();
    int64_t offset = getOffset();
    std::string relativeChunkPathStr = getRelativePathStr();
@@ -32,40 +33,50 @@ bool ResyncLocalFileMsgEx::processIncoming(ResponseContext& ctx)
    FhgfsOpsErr openRes;
 
    // should only be used for chunk balancing, to sync data to both buddies
-   if(isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_CHUNKBALANCE_BUDDYMIRROR) )
-   { // given targetID refers to a buddy mirror group
+   if (isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_CHUNKBALANCE_BUDDYMIRROR) )
+   { // given targetID is part of a buddy mirror group and chunk is mirrored
+      //need to determine if we are on primary or secondary
       MirrorBuddyGroupMapper* mirrorBuddies = app->getMirrorBuddyGroupMapper();
+      uint16_t buddyGroupID = mirrorBuddies->getBuddyGroupID(targetID);
       targetID = isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR_SECOND) ?
-         mirrorBuddies->getSecondaryTargetID(targetID) :
-         mirrorBuddies->getPrimaryTargetID(targetID);
-
-      if(unlikely(!targetID) )
+         mirrorBuddies->getSecondaryTargetID(buddyGroupID) : mirrorBuddies->getPrimaryTargetID(buddyGroupID);
+      if (unlikely(!targetID) )
       { // unknown target
-         LogContext(__func__).logErr("Invalid mirror buddy group ID: " +
-            StringTk::uintToStr(!targetID ) );
+         LogContext(__func__).logErr("Invalid targetID: " +
+           std::to_string(!targetID) + "; chunk path:" +
+            relativeChunkPathStr);
+
          retVal = FhgfsOpsErr_UNKNOWNTARGET;
          goto send_response;
       }
+      secondaryTargetID = mirrorBuddies->getSecondaryTargetID(buddyGroupID);
+      if (unlikely(!secondaryTargetID) )
+      { // unknown target
+         LogContext(__func__).logErr("Invalid secondary targetID: " +
+           std::to_string(!secondaryTargetID ) + "; chunk path:" +
+           relativeChunkPathStr);
+         retVal = FhgfsOpsErr_UNKNOWNTARGET;
+         goto send_response;
+      }
+
    }
 
    target = app->getStorageTargets()->getTarget(targetID);
    if (!target)
    {
       LogContext(__func__).logErr(
-         "Error resyncing chunk; Could not open FD; chunkPath: "
-            + relativeChunkPathStr);
-      retVal = FhgfsOpsErr_PATHNOTEXISTS;
+         "Error resyncing chunk; Invalid targetID; chunkPath: "
+            + relativeChunkPathStr + ", TargetID:" +  std::to_string(targetID ));
+      retVal = FhgfsOpsErr_INTERNAL;
       goto send_response;
    }
-
-   retVal = forwardToSecondary(*target, ctx);
+   retVal = forwardToSecondary(secondaryTargetID, *target, ctx);
    //check if path is relative to buddy mirror dir or chunks dir
    targetFD = isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR) 
          ? *target->getMirrorFD()
          : *target->getChunkFD();
-    
    // always truncate when we write the very first block of a file
-   if(!offset && !isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_NODATA) )
+   if (!offset && !isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_NODATA) )
       openFlags |= O_TRUNC;
 
    openRes = chunkStore->openChunkFile(targetFD, NULL, relativeChunkPathStr, true,
@@ -76,22 +87,22 @@ bool ResyncLocalFileMsgEx::processIncoming(ResponseContext& ctx)
       LogContext(__func__).logErr(
          "Error resyncing chunk; Could not open FD; chunkPath: "
             + relativeChunkPathStr);
-      retVal = FhgfsOpsErr_PATHNOTEXISTS;
+      retVal = FhgfsOpsErr_INTERNAL;
 
       target->setState(TargetConsistencyState_BAD);
 
       goto send_response;
    }
 
-   if(isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_NODATA)) // do not sync actual data
+   if (isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_NODATA)) // do not sync actual data
       goto set_attribs;
 
-   if(isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_CHECK_SPARSE))
+   if (isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_CHECK_SPARSE))
       writeRes = doWriteSparse(fd, dataBuf, count, offset, writeErrno);
    else
       writeRes = doWrite(fd, dataBuf, count, offset, writeErrno);
 
-   if(unlikely(!writeRes) )
+   if (unlikely(!writeRes) )
    { // write error occured (could also be e.g. disk full)
       LogContext(__func__).logErr(
          "Error resyncing chunk; chunkPath: " + relativeChunkPathStr + "; error: "
@@ -102,13 +113,13 @@ bool ResyncLocalFileMsgEx::processIncoming(ResponseContext& ctx)
       retVal = FhgfsOpsErrTk::fromSysErr(writeErrno);
    }
 
-   if(isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_TRUNC))
+   if (isMsgHeaderFeatureFlagSet (RESYNCLOCALFILEMSG_FLAG_TRUNC))
    {
       int truncErrno;
       // we trunc after a possible write, so we need to trunc at offset+count
       bool truncRes = doTrunc(fd, offset + count, truncErrno);
 
-      if(!truncRes)
+      if (!truncRes)
       {
          LogContext(__func__).logErr(
             "Error resyncing chunk; chunkPath: " + relativeChunkPathStr + "; error: "
@@ -122,17 +133,17 @@ bool ResyncLocalFileMsgEx::processIncoming(ResponseContext& ctx)
 
 set_attribs:
 
-   if(isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_SETATTRIBS) &&
+   if (isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_SETATTRIBS) &&
       (retVal == FhgfsOpsErr_SUCCESS))
    {
       SettableFileAttribs* attribs = getChunkAttribs();
       // update mode
       int chmodRes = fchmod(fd, attribs->mode);
-      if(chmodRes == -1)
+      if (chmodRes == -1)
       { // could be an error
          int errCode = errno;
 
-         if(errCode != ENOENT)
+         if (errCode != ENOENT)
          { // unhandled chmod() error
             LogContext(__func__).logErr("Unable to change file mode: " + relativeChunkPathStr
                + ". SysErr: " + System::getErrString());
@@ -141,18 +152,18 @@ set_attribs:
 
       // update UID and GID...
       int chownRes = fchown(fd, attribs->userID, attribs->groupID);
-      if(chownRes == -1)
+      if (chownRes == -1)
       { // could be an error
          int errCode = errno;
 
-         if(errCode != ENOENT)
+         if (errCode != ENOENT)
          { // unhandled chown() error
             LogContext(__func__).logErr( "Unable to change file owner: " + relativeChunkPathStr
                + ". SysErr: " + System::getErrString());
          }
       }
 
-      if((chmodRes == -1) || (chownRes == -1))
+      if ((chmodRes == -1) || (chownRes == -1))
       {
          target->setState(TargetConsistencyState_BAD);
          retVal = FhgfsOpsErr_INTERNAL;
@@ -209,16 +220,16 @@ bool ResyncLocalFileMsgEx::doWriteSparse(int fd, const char* buf, size_t count, 
       size_t cmpLen = BEEGFS_MIN(count - sumWriteRes, RESYNCER_SPARSE_BLOCK_SIZE);
       int cmpRes = memcmp(buf + sumWriteRes, zeroBuf, cmpLen);
 
-      if(!cmpRes)
+      if (!cmpRes)
       { // sparse area
          sumWriteRes += cmpLen;
 
-         if(sumWriteRes == count)
+         if (sumWriteRes == count)
          { // end of buf
             // we must trunc here because this might be the end of the file
             int truncRes = ftruncate(fd, offset+count);
 
-            if(unlikely(truncRes == -1) )
+            if (unlikely(truncRes == -1) )
             {
                outErrno = errno;
                return false;
@@ -230,7 +241,7 @@ bool ResyncLocalFileMsgEx::doWriteSparse(int fd, const char* buf, size_t count, 
          ssize_t writeRes = MsgHelperIO::pwrite(fd, buf + sumWriteRes, cmpLen,
             offset + sumWriteRes);
 
-         if(unlikely(writeRes == -1))
+         if (unlikely(writeRes == -1))
          {
             outErrno = errno;
             return false;
@@ -264,33 +275,35 @@ bool ResyncLocalFileMsgEx::doTrunc(int fd, off_t length, int& outErrno)
  *    case *outChunkLocked==false is guaranteed).
  * @throw SocketException if sending of GenericResponseMsg fails.
  */
-FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(StorageTarget& target, ResponseContext& ctx)
+FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(uint16_t& secondaryTargetID, StorageTarget& target, ResponseContext& ctx)
 {
    const char* logContext = "ResyncLocalFileMsg incoming (forward to secondary)";
 
    App* app = Program::getApp();
 
-   if(!isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_CHUNKBALANCE_BUDDYMIRROR))
+   if (!isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_CHUNKBALANCE_BUDDYMIRROR) ||
+      isMsgHeaderFeatureFlagSet(RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR_SECOND) )
       return FhgfsOpsErr_SUCCESS; // nothing to do
-
+   
    // instead of creating a new msg object, we just re-use "this" with "buddymirror second" flag
    addMsgHeaderFeatureFlag(RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR_SECOND);
 
    RequestResponseArgs rrArgs(NULL, this, NETMSGTYPE_ResyncLocalFileResp);
-   RequestResponseTarget rrTarget(getResyncToTargetID(), app->getTargetMapper(), app->getStorageNodes(),
-      app->getTargetStateStore(), app->getMirrorBuddyGroupMapper(), true);
+   RequestResponseTarget rrTarget(secondaryTargetID, app->getTargetMapper(), app->getStorageNodes());
+   rrTarget.setTargetStates(app->getTargetStateStore());
 
    FhgfsOpsErr commRes = MessagingTk::requestResponseTarget(&rrTarget, &rrArgs);
 
    // remove the flag that we just added for secondary
    unsetMsgHeaderFeatureFlag(RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR_SECOND);
 
-   if(unlikely(
+   if (unlikely(
       (commRes == FhgfsOpsErr_COMMUNICATION) &&
       (rrTarget.outTargetReachabilityState == TargetReachabilityState_OFFLINE) ) )
    {
+
       LogContext(logContext).log(Log_DEBUG, "Secondary is offline and will need resync. " 
-         "mirror buddy group ID: " + StringTk::uintToStr(getResyncToTargetID() ));
+         "secondary target ID: " + std::to_string(secondaryTargetID));
 
       // buddy is marked offline, so local msg processing will be done and buddy needs resync
       target.setBuddyNeedsResync(true);
@@ -298,14 +311,14 @@ FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(StorageTarget& target, Resp
       return FhgfsOpsErr_SUCCESS; // go ahead with local msg processing
    }
 
-   if(unlikely(commRes != FhgfsOpsErr_SUCCESS) )
+   if (unlikely(commRes != FhgfsOpsErr_SUCCESS) )
    {
       LogContext(logContext).log(Log_DEBUG, "Forwarding failed. "
-         "mirror buddy group ID: " + StringTk::uintToStr(getResyncToTargetID() ) + "; "
+         "secondary target ID: " + std::to_string(secondaryTargetID) + "; "
          "error: " + std::to_string(commRes));
 
       std::string genericRespStr = "Communication with secondary failed. "
-         "mirror buddy group ID: " + StringTk::uintToStr(getResyncToTargetID() );
+         "secondary target ID: " + std::to_string(secondaryTargetID);
 
       ctx.sendResponse(GenericResponseMsg(GenericRespMsgCode_INDIRECTCOMMERR,
                std::move(genericRespStr)));
@@ -315,9 +328,9 @@ FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(StorageTarget& target, Resp
 
    ResyncLocalFileRespMsg* respMsg = (ResyncLocalFileRespMsg*)rrArgs.outRespMsg.get();
    FhgfsOpsErr secondaryRes = respMsg->getResult();
-   if(unlikely(secondaryRes != FhgfsOpsErr_SUCCESS) )
+   if (unlikely(secondaryRes != FhgfsOpsErr_SUCCESS) )
    {
-      if(secondaryRes == FhgfsOpsErr_UNKNOWNTARGET)
+      if (secondaryRes == FhgfsOpsErr_UNKNOWNTARGET)
       {
          /* local msg processing shall be done and buddy needs resync
             (this is normal when a storage is restarted without a broken secondary target, so we
@@ -325,7 +338,7 @@ FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(StorageTarget& target, Resp
 
          LogContext(logContext).log(Log_DEBUG,
             "Secondary reports unknown target error and will need resync. "
-            "mirror buddy group ID: " + StringTk::uintToStr(getResyncToTargetID() ) );
+            "secondary target ID: " + std::to_string(secondaryTargetID ) );
 
          target.setBuddyNeedsResync(true);
 
@@ -334,7 +347,7 @@ FhgfsOpsErr ResyncLocalFileMsgEx::forwardToSecondary(StorageTarget& target, Resp
 
       LogContext(logContext).log(Log_NOTICE, std::string("Secondary reported error: ") +
          std::to_string(secondaryRes) + "; "
-         "mirror buddy group ID: " + StringTk::uintToStr(getResyncToTargetID()) );
+         "secondary target ID: " + std::to_string(secondaryTargetID ) );
 
       return secondaryRes;
    }

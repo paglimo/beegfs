@@ -14,6 +14,7 @@
 #include "FhgfsOpsFile.h"
 #include "FhgfsOpsFileNative.h"
 #include "FhgfsOpsHelper.h"
+#include "FhgfsXAttrHandlers.h"
 
 #include <linux/namei.h>
 #include <linux/backing-dev.h>
@@ -176,7 +177,6 @@ struct dentry* FhgfsOps_lookupIntent(struct inode* parentDir, struct dentry* den
       }
 
       LookupIntentInfoOut_uninit(&outInfo);
-
    }
 
    // handle result of stat retrieval (e.g. create new inode)...
@@ -307,11 +307,18 @@ int FhgfsOps_getattr(struct vfsmount* mnt, struct dentry* dentry, struct kstat* 
 
    if(!retVal)
    {
-#if defined(KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK)
-      os_generic_fillattr(inode, kstat, request_mask);
-#else
-      os_generic_fillattr(inode, kstat);
-#endif
+      #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+      #if defined(KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK)
+         generic_fillattr(idmap, request_mask, inode, kstat);
+      #else
+         generic_fillattr(idmap, inode, kstat);
+      #endif // KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK
+      #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+         generic_fillattr(mnt_userns, inode, kstat);
+      #else
+         generic_fillattr(inode, kstat);
+      #endif
+
 
       kstat->blksize = Config_getTuneInodeBlockSize(cfg);
 
@@ -375,15 +382,9 @@ ssize_t FhgfsOps_listxattr(struct dentry* dentry, char* value, size_t size)
  * @param size Size of the buffer.
  * @return Negative error number on failure, or the number of bytes used / required on success.
  */
-#ifdef KERNEL_HAS_DENTRY_XATTR_HANDLER
-ssize_t FhgfsOps_getxattr(struct dentry* dentry, const char* name, void* value, size_t size)
-{
-   struct inode* inode = dentry->d_inode;
-#else
+
 ssize_t FhgfsOps_getxattr(struct inode* inode, const char* name, void* value, size_t size)
 {
-#endif // KERNEL_HAS_DENTRY_XATTR_HANDLER
-
    App* app = FhgfsOps_getApp(inode->i_sb);
    Config* cfg = App_getConfig(app);
    FhgfsInode* fhgfsInode = BEEGFS_INODE(inode);
@@ -408,17 +409,27 @@ ssize_t FhgfsOps_getxattr(struct inode* inode, const char* name, void* value, si
 
    if(remotingRes != FhgfsOpsErr_SUCCESS)
       resSize = FhgfsOpsErr_toSysErr(remotingRes);
-   else
-   if (Config_getSysXAttrsCheckCapabilities(cfg) == CHECKCAPABILITIES_Cache
-       && resSize == 0 && !strcmp(name, XATTR_NAME_CAPS)) {
-      // We were looking for the xattr "security.capability" (XATTR_NAME_CAPS) and got an empty
-      // result, meaning that it doesn't exist. We cache that result via the weirdly named function
-      // "inode_has_no_xattr" which does exactly one thing and that is to set the flag "S_NOSEC"
-      // on the inode, if the inode doesn't have the setuid and setgid bits set and the superblock
-      // flag "SB_NOSEC" is set. We set that flag on the superblock according to user configuration.
-      // When "S_NOSEC" is set on the inode, the kernel will skip checking for capabilities on
-      // every write operation.
-      inode_has_no_xattr(inode);
+   else if (resSize == 0)
+   {
+      uint8_t res_cached = 0;
+      if ((Config_getSysXAttrsCheckCapabilities(cfg) == CHECKCAPABILITIES_Cache)
+            && !strcmp(name, XATTR_NAME_CAPS))
+         res_cached = 1;
+      else if (Config_getsysSELinuxEnabled(cfg) &&
+            (Config_getsysSELinuxRevalidate(cfg) == SELINUX_REVALIDATE_MODE_Cache) &&
+            !strcmp(name, XATTR_NAME_SELINUX))
+         res_cached = 1;
+      if (res_cached)
+      {
+         // We were looking for the xattr "security.capability" (XATTR_NAME_CAPS) or "security.linux" (XATTR_NAME_SELINUX)
+         // and got an empty result, meaning that it doesn't exist. We cache that result via the weirdly named function
+         // "inode_has_no_xattr" which does exactly one thing and that is to set the flag "S_NOSEC"
+         // on the inode, if the inode doesn't have the setuid and setgid bits set and the superblock
+         // flag "SB_NOSEC" is set. We set that flag on the superblock according to user configuration.
+         // When "S_NOSEC" is set on the inode, the kernel will skip checking for capabilities on
+         // every write operation.
+         inode_has_no_xattr(inode);
+      }
    }
 
    return resSize;
@@ -463,17 +474,9 @@ int FhgfsOps_removexattrInode(struct inode* inode, const char* name)
 /**
  * Set an extended attribute for a file.
  */
-#ifdef KERNEL_HAS_DENTRY_XATTR_HANDLER
-int FhgfsOps_setxattr(struct dentry* dentry, const char* name, const void* value, size_t size,
-      int flags)
-{
-   struct inode* inode = dentry->d_inode;
-#else
 int FhgfsOps_setxattr(struct inode* inode, const char* name, const void* value, size_t size,
       int flags)
 {
-#endif // KERNEL_HAS_DENTRY_XATTR_HANDLER
-
    App* app = FhgfsOps_getApp(inode->i_sb);
    FhgfsInode* fhgfsInode = BEEGFS_INODE(inode);
    FhgfsOpsErr remotingRes;
@@ -498,6 +501,7 @@ int FhgfsOps_setxattr(struct inode* inode, const char* name, const void* value, 
 static struct posix_acl* Fhgfs_get_acl(struct inode* inode, int type)
 {
    App* app = FhgfsOps_getApp(inode->i_sb);
+   Config* cfg = App_getConfig(app);
 
    struct posix_acl* res = NULL;
    char* xAttrName;
@@ -511,7 +515,10 @@ static struct posix_acl* Fhgfs_get_acl(struct inode* inode, int type)
 
    int refreshRes;
 
-   forget_all_cached_acls(inode);
+   // drop ACL caches if configured to do so
+   if (Config_getSysACLsRevalidate(cfg) == ACLSREVALIDATE_Always) {
+      forget_all_cached_acls(inode);
+   }
 
    refreshRes = maybeRefreshInode(inode, true, false, false);
    if (refreshRes)
@@ -800,7 +807,7 @@ int FhgfsOps_aclChmod(struct iattr* iattr, struct dentry* dentry)
 
    // We call FhgfsOps_setxattr directly instead of using the XAttr handler
    // because the handler would try to chmod again.
-   res = FhgfsOps_setxattr(dentry, XATTR_NAME_POSIX_ACL_ACCESS, xAttrBuf, xAttrBufLen, 0);
+   res = FhgfsOps_setxattr(dentry->d_inode, XATTR_NAME_POSIX_ACL_ACCESS, xAttrBuf, xAttrBufLen, 0);
 
 buf_cleanup:
    kfree(xAttrBuf);
@@ -850,7 +857,13 @@ int FhgfsOps_setattr(struct dentry* dentry, struct iattr* iattr)
    }
 
 #ifdef KERNEL_HAS_SETATTR_PREPARE
-   setAttrPrepRes = os_setattr_prepare(dentry, iattr);
+   #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
+      setAttrPrepRes = setattr_prepare(idmap, dentry, iattr);
+   #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
+      setAttrPrepRes = setattr_prepare(mnt_userns, dentry, iattr);
+   #else
+      setAttrPrepRes = setattr_prepare(dentry, iattr);
+   #endif
 #else
    setAttrPrepRes = inode_change_ok(inode, iattr);
 #endif
@@ -2357,6 +2370,7 @@ struct inode* FhgfsOps_alloc_inode(struct super_block *sb)
    Config* cfg = App_getConfig(app);
 
    FhgfsInode* fhgfsInode;
+   struct inode* sysInode;
 
    fhgfsInode = kmem_cache_alloc(FhgfsInodeCache, GFP_KERNEL);
    if(unlikely(!fhgfsInode) )
@@ -2365,8 +2379,9 @@ struct inode* FhgfsOps_alloc_inode(struct super_block *sb)
    FhgfsInode_allocInit(fhgfsInode);
 
    fhgfsInode->vfs_inode.i_blkbits = Config_getTuneInodeBlockBits(cfg);
+   sysInode = (struct inode*)fhgfsInode;
 
-   return (struct inode*)fhgfsInode;
+   return sysInode;
 }
 
 void FhgfsOps_destroy_inode(struct inode* inode)
@@ -2600,6 +2615,9 @@ int __FhgfsOps_instantiateInode(struct dentry* dentry, EntryInfo* entryInfo, fhg
             // to user configuration. When "S_NOSEC" is set on the inode, the kernel will skip
             // checking for capabilities on every write operation.
             inode_has_no_xattr(newInode);
+
+         if (Config_getsysSELinuxEnabled(cfg))
+            FhgfsXAttr_init_security(newInode, dentry->d_parent->d_inode, &dentry->d_name);
 
          d_instantiate(dentry, newInode);
       }
@@ -2841,6 +2859,10 @@ int __FhgfsOps_doRefreshInode(App* app, struct inode* inode, fhgfs_stat* fhgfsSt
    Time_setToNow(&fhgfsInode->dataCacheTime); 
    spin_unlock(&inode->i_lock); // I _ U N L O C K
 
+   // drop ACL caches as ACLs might have been updated
+   if (Config_getSysACLsRevalidate(cfg) == ACLSREVALIDATE_Cache) {
+      forget_all_cached_acls(inode);
+   }
 
    // clean up
 cleanup:
@@ -2916,7 +2938,7 @@ void __FhgfsOps_clearInodeStripePattern(App* app, struct inode* inode)
       inode->i_mode = savedMode; // restore mode
 
       FhgfsOpsHelper_logOpMsg(Log_WARNING, app, NULL, inode, logContext, 
-         "Blocked access to inode due to unexpected inode access during cache invalidation");
+         "Blocked access to inode due to hardlink or other unexpected inode access during cache invalidation");
       
 
       // invalidate cached pages

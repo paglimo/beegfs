@@ -7,6 +7,7 @@
 #include <common/Common.h>
 #include "NetMessageLogHelper.h"
 #include "NetMessageTypes.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <climits>
 
@@ -107,7 +108,7 @@ class NetMessage
          friend class NetMessage;
 
          public:
-            ResponseContext(struct sockaddr_in* fromAddr, Socket* sock, char* respBuf,
+            ResponseContext(struct sockaddr* fromAddr, Socket* sock, char* respBuf,
                unsigned bufLen, HighResolutionStats* stats, bool locallyGenerated = false)
                : fromAddr(fromAddr), socket(sock), responseBuffer(respBuf),
                  responseBufferLength(bufLen), stats(stats), locallyGenerated(locallyGenerated)
@@ -117,8 +118,13 @@ class NetMessage
             {
                unsigned msgLength =
                   response.serializeMessage(responseBuffer, responseBufferLength).second;
-               socket->sendto(responseBuffer, msgLength, 0,
-                  reinterpret_cast<const sockaddr*>(fromAddr), sizeof(*fromAddr) );
+
+               if(fromAddr) {
+                  SocketAddress a(fromAddr);
+                  socket->sendto(responseBuffer, msgLength, 0, &a);
+               } else {
+                  socket->sendto(responseBuffer, msgLength, 0, nullptr);
+               }
             }
 
             HighResolutionStats* getStats() const { return stats; }
@@ -128,13 +134,13 @@ class NetMessage
 
             std::string peerName() const
             {
-               return fromAddr ? Socket::ipaddrToStr(fromAddr->sin_addr) : socket->getPeername();
+               return fromAddr ? Socket::ipaddrToStr(fromAddr) : socket->getPeername();
             }
 
             bool isLocallyGenerated() const { return locallyGenerated; }
 
          private:
-            struct sockaddr_in* fromAddr;
+            struct sockaddr* fromAddr;
             Socket* socket;
             char* responseBuffer;
             unsigned responseBufferLength;

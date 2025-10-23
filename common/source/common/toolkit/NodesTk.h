@@ -11,10 +11,10 @@ class NodesTk
 {
    public:
       static bool waitForMgmtHeartbeat(PThread* currentThread, AbstractDatagramListener* dgramLis,
-         const NodeStoreServers* mgmtNodes, std::string hostname, unsigned short portUDP,
+         const NodeStoreServers* mgmtNodes, std::string hostname, uint16_t portUDP,
          unsigned timeoutMS, unsigned nameResolutionRetries);
       static std::shared_ptr<Node> downloadNodeInfo(const std::string& hostname,
-         unsigned short port, uint64_t connAuthHash, AbstractNetMessageFactory* netMessageFactory,
+         uint16_t port, uint64_t connAuthHash, AbstractNetMessageFactory* netMessageFactory,
          NodeType nodeType, int timeoutMS);
       static bool downloadNodes(Node& sourceNode, NodeType nodeType,
          std::vector<NodeHandle>& outNodes, bool silenceLog, NumNodeID* outRootNumID=NULL,

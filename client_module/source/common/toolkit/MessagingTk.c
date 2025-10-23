@@ -613,18 +613,18 @@ FhgfsOpsErr __MessagingTk_requestResponseWithRRArgsComm(App* app,
          if (fatal_signal_pending(current)){
             Logger_logFormatted(log, Log_NOTICE, logContext,
                "Receive interrupted by signal. Node: %s @ %s",
-               nodeAndType.buf, Socket_getPeername(sock) );
+               nodeAndType.buf, sock->peername);
          }
          else
          if(respRes == -ETIMEDOUT) {
             Logger_logFormatted(log, Log_WARNING, logContext,
                "Receive timed out from %s @ %s",
-               nodeAndType.buf, Socket_getPeername(sock) );
+               nodeAndType.buf, sock->peername);
          }
          else {
             Logger_logFormatted(log, Log_WARNING, logContext,
                "Receive failed from %s @ %s (recv result: %zi)",
-               nodeAndType.buf, Socket_getPeername(sock), respRes);
+               nodeAndType.buf, sock->peername, respRes);
          }
 
          Logger_logFormatted(log, Log_DEBUG, logContext,
@@ -666,7 +666,7 @@ FhgfsOpsErr __MessagingTk_requestResponseWithRRArgsComm(App* app,
       Logger_logErrFormatted(log, logContext,
          "Received invalid response type: %hu; expected: %d. Disconnecting: %s (%s)",
          NetMessage_getMsgType(rrArgs->outRespMsg), rrArgs->respMsgType,
-         nodeAndType.buf, Socket_getPeername(sock) );
+         nodeAndType.buf, sock->peername);
 
       retVal = FhgfsOpsErr_INTERNAL;
       goto socket_invalidate;

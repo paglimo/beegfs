@@ -53,16 +53,16 @@ enum IBVSocketKeyType
 typedef enum IBVSocketKeyType IBVSocketKeyType;
 
 // construction/destruction
-extern __must_check bool IBVSocket_init(IBVSocket* _this, struct in_addr srcIpAddr, NicAddressStats* nicStats);
+extern __must_check bool IBVSocket_init(IBVSocket* _this, int domain, struct in6_addr srcIpAddr, NicAddressStats* nicStats);
 extern void IBVSocket_uninit(IBVSocket* _this);
 
 // static
 extern bool IBVSocket_rdmaDevicesExist(void);
 
 // methods
-extern bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress,
+extern bool IBVSocket_connectByIP(IBVSocket* _this, struct in6_addr ipaddress,
    unsigned short port, IBVCommConfig* commCfg);
-extern bool IBVSocket_bindToAddr(IBVSocket* _this, struct in_addr ipAddr,
+extern bool IBVSocket_bindToAddr(IBVSocket* _this, struct in6_addr ipAddr,
    unsigned short port);
 extern bool IBVSocket_listen(IBVSocket* _this);
 extern bool IBVSocket_shutdown(IBVSocket* _this);
@@ -80,7 +80,6 @@ extern void IBVSocket_setTimeouts(IBVSocket* _this, int connectMS,
    int completionMS, int flowSendMS, int flowRecvMS, int pollMS);
 extern void IBVSocket_setTypeOfService(IBVSocket* _this, int typeOfService);
 extern void IBVSocket_setConnectionFailureStatus(IBVSocket* _this, unsigned value);
-extern struct in_addr IBVSocket_getSrcIpAddr(IBVSocket* _this);
 
 // Only access members of NicAddressStats when the owner NodeConnPool mutex is held.
 // OK to access "nic" without holding mutex.
@@ -193,7 +192,7 @@ struct IBVIncompleteRecv
 struct IBVIncompleteSend
 {
    unsigned             numAvailable;
-   bool           forceWaitForAll; // true if we received only some completions and need
+   bool                 forceWaitForAll; // true if we received only some completions and need
                                          //    to wait for the rest before we can send more data
 };
 
@@ -204,11 +203,11 @@ struct IBVCommContext
    atomic_t                  recvCompEventCount; // incremented on incoming event notification
    wait_queue_head_t         recvCompWaitQ; // for recvCompEvents
    wait_queue_t              recvWait;
-   bool                recvWaitInitialized; // true if init_wait was called for the thread
+   bool                      recvWaitInitialized; // true if init_wait was called for the thread
    atomic_t                  sendCompEventCount; // incremented on incoming event notification
    wait_queue_head_t         sendCompWaitQ; // for sendCompEvents
    wait_queue_t              sendWait;
-   bool                sendWaitInitialized; // true if init_wait was called for the thread
+   bool                      sendWaitInitialized; // true if init_wait was called for the thread
 
    struct ib_cq*             recvCQ; // recv completion queue
    struct ib_cq*             sendCQ; // send completion queue
@@ -246,7 +245,7 @@ struct IBVSocket
 
 
    struct rdma_cm_id*            cm_id;
-   struct in_addr                srcIpAddr;
+   struct in6_addr               srcIpAddr;
 
    IBVCommDest                   localDest;
    IBVCommDest*                  remoteDest;
@@ -265,6 +264,7 @@ struct IBVSocket
    IBVTimeoutConfig              timeoutCfg;
    Mutex                         cmaMutex;  // used to manage concurrency of cm_id and commContext
                                             // with __IBVSocket_cmaHandler
+   int                           sockDomain;
 };
 
 

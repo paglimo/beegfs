@@ -1,12 +1,14 @@
 #include <app/config/Config.h>
 #include <app/log/Logger.h>
 #include <app/App.h>
+#include <common/net/sock/IpAddress.h>
 #include <common/nodes/MirrorBuddyGroupMapper.h>
 #include <common/nodes/TargetMapper.h>
 #include <common/nodes/TargetStateStore.h>
 #include <common/system/System.h>
 #include <common/toolkit/ackstore/AcknowledgmentStore.h>
 #include <common/toolkit/NetFilter.h>
+#include <common/toolkit/NicAddressFilter.h>
 #include <common/toolkit/Time.h>
 #include <components/AckManager.h>
 #include <components/DatagramListener.h>
@@ -30,6 +32,38 @@
    #error BEEGFS_VERSION undefined
 #endif
 
+static int __App_probe_sockDomain(App* this)
+{
+   int sockDomain = AF_INET6;
+   StandardSocket *sock = NULL;
+
+   sock = StandardSocket_construct(AF_INET6, SOCK_STREAM, 0);
+   if (sock)
+   {
+      struct in6_addr addr = in6addr_loopback;
+      int port = Config_getConnClientPort(this->cfg);
+
+      struct sockaddr_in6 saddr = beegfs_make_sockaddr_in6(addr, port);
+      int err = kernel_connect(sock->sock, beegfs_get_sockaddr(&saddr), sizeof(saddr), 0);
+
+      if (err == -EADDRNOTAVAIL)
+      {
+         printk_fhgfs(KERN_INFO, "IPv6 availability check failed during connect. Falling back to IPv4\n");
+         sockDomain = AF_INET;
+      }
+      _StandardSocket_uninit((Socket *) sock);
+      kfree(sock);
+   }
+   else
+   {
+      printk_fhgfs(KERN_INFO, "IPv6 availability check failed during socket creation. Falling back to IPv4\n");
+      sockDomain = AF_INET;
+   }
+
+   return sockDomain;
+}
+
+
 /**
  * @param mountConfig belongs to the app afterwards (and will automatically be destructed
  * by the app)
@@ -48,8 +82,8 @@ void App_init(App* this, MountConfig* mountConfig)
    this->tcpOnlyFilter = NULL;
    this->logger = NULL;
    this->fsUUID = NULL;
-   StrCpyList_init(&this->allowedInterfaces);
-   StrCpyList_init(&this->allowedRDMAInterfaces);
+   this->nicAddressFilter = NULL;
+   this->rdmaNicAddressFilter = NULL;
    UInt16List_init(&this->preferredMetaNodes);
    UInt16List_init(&this->preferredStorageTargets);
    this->cacheBufStore = NULL;
@@ -81,6 +115,8 @@ void App_init(App* this, MountConfig* mountConfig)
    Mutex_init(&this->nicListMutex);
    Mutex_init(&this->fsUUIDMutex);
 
+   this->sockDomain = AF_INET6;
+
 #ifdef BEEGFS_DEBUG
    Mutex_init(&this->debugCounterMutex);
 
@@ -88,7 +124,6 @@ void App_init(App* this, MountConfig* mountConfig)
    this->numRemoteReads = 0;
    this->numRemoteWrites = 0;
 #endif // BEEGFS_DEBUG
-
 }
 
 void App_uninit(App* this)
@@ -119,8 +154,8 @@ void App_uninit(App* this)
    SAFE_DESTRUCT(this->cacheBufStore, NoAllocBufferStore_destruct);
    UInt16List_uninit(&this->preferredStorageTargets);
    UInt16List_uninit(&this->preferredMetaNodes);
-   StrCpyList_uninit(&this->allowedInterfaces);
-   StrCpyList_uninit(&this->allowedRDMAInterfaces);
+   SAFE_DESTRUCT(this->nicAddressFilter, NicAddressFilter_destruct);
+   SAFE_DESTRUCT(this->rdmaNicAddressFilter, NicAddressFilter_destruct);
    SAFE_DESTRUCT(this->logger, Logger_destruct);
    SAFE_DESTRUCT(this->tcpOnlyFilter, NetFilter_destruct);
    SAFE_DESTRUCT(this->netFilter, NetFilter_destruct);
@@ -169,7 +204,7 @@ int App_run(App* this)
 
    if(!__App_initInodeOperations(this) )
    {
-      printk_fhgfs(KERN_WARNING, "Initialization of inode operations failed.");
+      printk_fhgfs(KERN_WARNING, "Initialization of inode operations failed.\n");
       this->appResult = APPCODE_INITIALIZATION_ERROR;
       return this->appResult;
    }
@@ -239,18 +274,12 @@ bool __App_initDataObjects(App* this, MountConfig* mountConfig)
 {
    const char* logContext = "App (init data objects)";
 
-   char* interfacesFilename;
-   char* rdmaInterfacesFilename;
-   char* preferredMetaFile;
-   char* preferredStorageFile;
    size_t numCacheBufs;
    size_t cacheBufSize;
    size_t numPathBufs;
    size_t pathBufsSize;
    size_t numMsgBufs;
    size_t msgBufsSize;
-   char* interfacesList;
-
    AtomicInt_init(&this->lockAckAtomicCounter, 0);
 
    this->cfg = Config_construct(mountConfig);
@@ -263,6 +292,12 @@ bool __App_initDataObjects(App* this, MountConfig* mountConfig)
       printk_fhgfs(KERN_WARNING, "Management host undefined\n");
       return false;
    }
+
+   // check if IPv6 is explicitly disabled. Required before enumerating interfaces
+   if (Config_getConnDisableIPv6(this->cfg))
+      this->sockDomain = AF_INET;
+   else
+      this->sockDomain = __App_probe_sockDomain(this);
 
    { // load net filter (required before any connection can be made, incl. local conns)
       const char* netFilterFile = Config_getConnNetFilterFile(this->cfg);
@@ -291,49 +326,75 @@ bool __App_initDataObjects(App* this, MountConfig* mountConfig)
 
 
    // load allowed interface list
-   interfacesList = Config_getConnInterfacesList(this->cfg);
-   if (StringTk_hasLength(interfacesList) )
-      StringTk_explode(interfacesList, ',', &this->allowedInterfaces);
-   else
    {
-      // load allowed interface file
-      interfacesFilename = Config_getConnInterfacesFile(this->cfg);
-      if(strlen(interfacesFilename) &&
-         !Config_loadStringListFile(interfacesFilename, &this->allowedInterfaces) )
+      const char *interfacesList = Config_getConnInterfacesList(this->cfg);
+      StrCpyList filterList;
+      StrCpyList_init(&filterList);
+      if (StringTk_hasLength(interfacesList))
       {
-         Logger_logErrFormatted(this->logger, logContext,
-            "Unable to load configured interfaces file: %s", interfacesFilename);
+         // Load filterList from comma-separated config string
+         StringTk_explode(interfacesList, ',', &filterList);
+      }
+      else
+      {
+         // load filterList from configured filepath
+         const char *path = Config_getConnInterfacesFile(this->cfg);
+         if (StringTk_hasLength(path) && !Config_loadStringListFile(path, &filterList))
+         {
+            Logger_logErrFormatted(this->logger, logContext, "Unable to load configured interfaces file: %s", path);
+            return false;
+         }
+      }
+      this->nicAddressFilter = NicAddressFilter_construct(&filterList);
+      StrCpyList_uninit(&filterList);
+      if (! this->nicAddressFilter)
+      {
+         Logger_logErrFormatted(this->logger, logContext, "Unable to construct interfaces filter.\n");
          return false;
       }
    }
 
    // load allowed RDMA interface file
-   rdmaInterfacesFilename = Config_getConnRDMAInterfacesFile(this->cfg);
-   if(strlen(rdmaInterfacesFilename) &&
-      !Config_loadStringListFile(rdmaInterfacesFilename, &this->allowedRDMAInterfaces) )
    {
-      Logger_logErrFormatted(this->logger, logContext,
-         "Unable to load configured RDMA interfaces file: %s", rdmaInterfacesFilename);
-      return false;
+      const char *path = Config_getConnRDMAInterfacesFile(this->cfg);
+      StrCpyList filterList;
+      StrCpyList_init(&filterList);
+      if(StringTk_hasLength(path) && !Config_loadStringListFile(path, &filterList) )
+      {
+         Logger_logErrFormatted(this->logger, logContext, "Unable to load configured RDMA interfaces file: %s", path);
+         return false;
+      }
+      this->rdmaNicAddressFilter = NicAddressFilter_construct(&filterList);
+      StrCpyList_uninit(&filterList);
+      if (! this->rdmaNicAddressFilter)
+      {
+         Logger_logErrFormatted(this->logger, logContext,
+               "Unable to construct RDMA interfaces filter.\n");
+         return false;
+      }
    }
 
    // load preferred nodes files
-   preferredMetaFile = Config_getTunePreferredMetaFile(this->cfg);
-   if(strlen(preferredMetaFile) &&
-      !Config_loadUInt16ListFile(this->cfg, preferredMetaFile, &this->preferredMetaNodes) )
    {
-      Logger_logErrFormatted(this->logger, logContext,
-         "Unable to load configured preferred meta nodes file: %s", preferredMetaFile);
-      return false;
+      const char *preferredMetaFile = Config_getTunePreferredMetaFile(this->cfg);
+      if(strlen(preferredMetaFile) &&
+            !Config_loadUInt16ListFile(this->cfg, preferredMetaFile, &this->preferredMetaNodes) )
+      {
+         Logger_logErrFormatted(this->logger, logContext,
+               "Unable to load configured preferred meta nodes file: %s", preferredMetaFile);
+         return false;
+      }
    }
 
-   preferredStorageFile = Config_getTunePreferredStorageFile(this->cfg);
-   if(strlen(preferredStorageFile) &&
-      !Config_loadUInt16ListFile(this->cfg, preferredStorageFile, &this->preferredStorageTargets) )
    {
-      Logger_logErrFormatted(this->logger, logContext,
-         "Unable to load configured preferred storage nodes file: %s", preferredStorageFile);
-      return false;
+      const char *preferredStorageFile = Config_getTunePreferredStorageFile(this->cfg);
+      if(strlen(preferredStorageFile) &&
+            !Config_loadUInt16ListFile(this->cfg, preferredStorageFile, &this->preferredStorageTargets) )
+      {
+         Logger_logErrFormatted(this->logger, logContext,
+               "Unable to load configured preferred storage nodes file: %s", preferredStorageFile);
+         return false;
+      }
    }
 
    // init stores, queues etc.
@@ -603,7 +664,7 @@ bool App_findAllowedInterfaces(App* this, NicAddressList* nicList)
    bool result;
 
    NicAddressList_init(&tmpNicList);
-   NIC_findAll(&this->allowedInterfaces, useRDMA, false, &tmpNicList);
+   NIC_findAll(this->nicAddressFilter, useRDMA, false, this->sockDomain, &tmpNicList);
 
    if(!NicAddressList_length(&tmpNicList) )
    {
@@ -612,7 +673,7 @@ bool App_findAllowedInterfaces(App* this, NicAddressList* nicList)
    }
 
    // created sorted tmpNicList clone
-   ListTk_cloneSortNicAddressList(&tmpNicList, nicList, &this->allowedInterfaces);
+   ListTk_cloneSortNicAddressList(&tmpNicList, nicList, this->nicAddressFilter);
 
    result = true;
 
@@ -634,12 +695,12 @@ void App_findAllowedRDMAInterfaces(App* this, NicAddressList* nicList, NicAddres
 {
    const char* logContext = "App (find RDMA interfaces)";
    bool useRDMA = Config_getConnUseRDMA(this->cfg);
-   if (useRDMA && StrCpyList_length(&this->allowedRDMAInterfaces) > 0)
+   if (useRDMA)
    {
       NicAddressList tmpList;
 
       NicAddressList_init(&tmpList);
-      NIC_findAll(&this->allowedRDMAInterfaces, true, true, &tmpList);
+      NIC_findAll(this->rdmaNicAddressFilter, true, true, this->sockDomain, &tmpList);
 
       if(!NicAddressList_length(&tmpList) )
       {
@@ -649,7 +710,7 @@ void App_findAllowedRDMAInterfaces(App* this, NicAddressList* nicList, NicAddres
       else
       {
          // created sorted rdmaNicList clone
-         ListTk_cloneSortNicAddressList(&tmpList, rdmaNicList, &this->allowedRDMAInterfaces);
+         ListTk_cloneSortNicAddressList(&tmpList, rdmaNicList, this->rdmaNicAddressFilter);
       }
       ListTk_kfreeNicAddressListElems(&tmpList);
       NicAddressList_uninit(&tmpList);
@@ -825,7 +886,6 @@ void __App_logInfos(App* this)
    const char* logContext = "App_logInfos";
    NodeString alias;
    size_t nicListStrLen = 1024;
-   char* nicListStr = os_kmalloc(nicListStrLen);
    char* extendedNicListStr = os_kmalloc(nicListStrLen);
    NicAddressList nicList;
    NicAddressListIter nicIter;
@@ -844,7 +904,6 @@ void __App_logInfos(App* this)
 
    // list usable network interfaces
    NicAddressListIter_init(&nicIter, &nicList);
-   nicListStr[0] = 0;
    extendedNicListStr[0] = 0;
 
    for( ; !NicAddressListIter_end(&nicIter); NicAddressListIter_next(&nicIter) )
@@ -862,11 +921,6 @@ void __App_logInfos(App* this)
       else
          nicTypeStr = "Unknown";
 
-      // short NIC info
-      snprintf(tmpStr, nicListStrLen, "%s%s(%s) ", nicListStr, nicAddr->name, nicTypeStr);
-      strcpy(nicListStr, tmpStr); // tmpStr to avoid writing to a buffer that we're reading
-         // from at the same time
-
       // extended NIC info
       nicAddrStr = NIC_nicAddrToString(nicAddr);
       snprintf(tmpStr, nicListStrLen, "%s\n+ %s", extendedNicListStr, nicAddrStr);
@@ -877,8 +931,7 @@ void __App_logInfos(App* this)
       SAFE_KFREE(tmpStr);
    }
 
-   Logger_logFormatted(this->logger, 2, logContext, "Usable NICs: %s", nicListStr);
-   Logger_logFormatted(this->logger, 4, logContext, "Extended list of usable NICs: %s",
+   Logger_logFormatted(this->logger, Log_WARNING, logContext, "Usable NICs: %s",
       extendedNicListStr);
 
    // print net filters
@@ -919,7 +972,6 @@ void __App_logInfos(App* this)
    }
 
    // clean up
-   SAFE_KFREE(nicListStr);
    SAFE_KFREE(extendedNicListStr);
 
    ListTk_kfreeNicAddressListElems(&nicList);

@@ -18,7 +18,7 @@
 #include <common/net/message/nodes/SetTargetConsistencyStatesRespMsg.h>
 #include <common/net/message/nodes/storagepools/GetStoragePoolsRespMsg.h>
 #include <net/message/nodes/GenericDebugMsgEx.h>
-#include <net/message/nodes/GetClientStatsMsgEx.h>
+#include "net/message/nodes/GetClientStatsV2MsgEx.h"
 #include <net/message/nodes/GetNodeCapacityPoolsMsgEx.h>
 #include <net/message/nodes/GetNodesMsgEx.h>
 #include <net/message/nodes/GetTargetMappingsMsgEx.h>
@@ -157,8 +157,8 @@
 
 // chunk balancing
 #include <common/net/message/storage/chunkbalancing/CpChunkPathsRespMsg.h>
-#include <net/message/storage/chunkbalancing/ChunkBalanceMsgEx.h>
-#include <net/message/storage/chunkbalancing/StripePatternUpdateMsgEx.h>
+#include <net/message/storage/chunkbalancing/StartChunkBalanceMsgEx.h>
+#include <net/message/storage/chunkbalancing/UpdateStripePatternMsgEx.h>
 
 
 #include <common/net/message/SimpleMsg.h>
@@ -191,7 +191,7 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       // nodes messages
       case NETMSGTYPE_ChangeTargetConsistencyStatesResp: { msg = new ChangeTargetConsistencyStatesRespMsg(); } break;
       case NETMSGTYPE_GenericDebug: { msg = new GenericDebugMsgEx(); } break;
-      case NETMSGTYPE_GetClientStats: { msg = new GetClientStatsMsgEx(); } break;
+      case NETMSGTYPE_GetClientStatsV2: { msg = new GetClientStatsV2MsgEx(); } break;
       case NETMSGTYPE_GetMirrorBuddyGroupsResp: { msg = new GetMirrorBuddyGroupsRespMsg(); } break;
       case NETMSGTYPE_GetNodeCapacityPools: { msg = new GetNodeCapacityPoolsMsgEx(); } break;
       case NETMSGTYPE_GetNodeCapacityPoolsResp: { msg = new GetNodeCapacityPoolsRespMsg(); } break;
@@ -217,8 +217,8 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_SetTargetConsistencyStatesResp: { msg = new SetTargetConsistencyStatesRespMsg(); } break;
 
       // storage messages
-      case NETMSGTYPE_ChunkBalance: { msg = new ChunkBalanceMsgEx(); } break;
-      case NETMSGTYPE_CpChunkPathsResp: { msg = new CpChunkPathsRespMsg(); } break;
+      case NETMSGTYPE_StartChunkBalance: { msg = new StartChunkBalanceMsgEx(); } break;
+      case NETMSGTYPE_CpChunkPathsResp: { msg = new CpChunkPathsRespMsg(); } break; 
       case NETMSGTYPE_FindLinkOwner: { msg = new FindLinkOwnerMsgEx(); } break;
       case NETMSGTYPE_FindOwner: { msg = new FindOwnerMsgEx(); } break;
       case NETMSGTYPE_FindOwnerResp: { msg = new FindOwnerRespMsg(); } break;
@@ -282,7 +282,6 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_StatResp: { msg = new StatRespMsg(); } break;
       case NETMSGTYPE_StatStoragePath: { msg = new StatStoragePathMsgEx(); } break;
       case NETMSGTYPE_StatStoragePathResp: { msg = new StatStoragePathRespMsg(); } break;
-      case NETMSGTYPE_StripePatternUpdate: { msg = new StripePatternUpdateMsgEx(); } break;
       case NETMSGTYPE_TruncFile: { msg = new TruncFileMsgEx(); } break;
       case NETMSGTYPE_TruncFileResp: { msg = new TruncFileRespMsg(); } break;
       case NETMSGTYPE_TruncLocalFileResp: { msg = new TruncLocalFileRespMsg(); } break;
@@ -291,6 +290,8 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_UnlinkLocalFileResp: { msg = new UnlinkLocalFileRespMsg(); } break;
       case NETMSGTYPE_UpdateDirParent: { msg = new UpdateDirParentMsgEx(); } break;
       case NETMSGTYPE_UpdateDirParentResp: { msg = new UpdateDirParentRespMsg(); } break;
+      case NETMSGTYPE_UpdateStripePattern: { msg = new UpdateStripePatternMsgEx(); } break;
+      case NETMSGTYPE_UpdateStripePatternResp: { msg = new UpdateStripePatternRespMsg(); } break;
       case NETMSGTYPE_MoveFileInode: { msg = new MoveFileInodeMsgEx(); } break;
       case NETMSGTYPE_MoveFileInodeResp: {msg = new MoveFileInodeRespMsg(); } break;
       case NETMSGTYPE_UnlinkLocalFileInode: {msg = new UnlinkLocalFileInodeMsgEx(); } break;

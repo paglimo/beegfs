@@ -6,15 +6,12 @@
 #include <common/Common.h>
 #include <common/net/sock/NicAddress.h>
 #include <linux/socket.h>
+#include <linux/inet.h>  // INET6_ADDRSTRLEN
 #include <os/iov_iter.h>
-
-
-#define SOCKET_PEERNAME_LEN   24
 
 /*
  * This is an abstract class.
  */
-
 
 struct Socket;
 typedef struct Socket Socket;
@@ -24,7 +21,7 @@ extern void _Socket_init(Socket* this);
 extern void _Socket_uninit(Socket* this);
 
 extern bool Socket_bind(Socket* this, unsigned short port);
-extern bool Socket_bindToAddr(Socket* this, struct in_addr ipAddr, unsigned short port);
+extern bool Socket_bindToAddr(Socket* this, struct in6_addr ipAddr, unsigned short port);
 
 
 
@@ -32,21 +29,33 @@ struct SocketOps
 {
    void (*uninit)(Socket* this);
 
-   bool (*connectByIP)(Socket* this, struct in_addr ipaddress, unsigned short port);
-   bool (*bindToAddr)(Socket* this, struct in_addr ipaddress, unsigned short port);
+   bool (*connectByIP)(Socket* this, struct in6_addr ipaddress, unsigned short port);
+   bool (*bindToAddr)(Socket* this, struct in6_addr ipaddress, unsigned short port);
    bool (*listen)(Socket* this);
    bool (*shutdown)(Socket* this);
    bool (*shutdownAndRecvDisconnect)(Socket* this, int timeoutMS);
 
-   ssize_t (*sendto)(Socket* this, struct iov_iter* iter, int flags, fhgfs_sockaddr_in *to);
+   ssize_t (*sendto)(Socket* this, struct iov_iter* iter, int flags, struct sockaddr_in6 *to);
    ssize_t (*recvT)(Socket* this, struct iov_iter* iter, int flags, int timeoutMS);
 };
+
+
+#define SOCKET_IPADDRSTR_LEN         INET6_ADDRSTRLEN  // currently defined as 48
 
 struct Socket
 {
    NicAddrType_t sockType;
-   char peername[SOCKET_PEERNAME_LEN];
-   struct in_addr peerIP;
+
+
+   // Formerly this buffer was 24 bytes large, mostly to support strings
+   // containing IPv4 address + port.  With added IPv6 support, we are using
+   // SOCKET_IPADDRSTR_LEN which is currently 48.
+   char peername[SOCKET_IPADDRSTR_LEN];
+
+   // Temp buffer for formatting purposes (see Socket_formatAddrOrPeername())
+   char temp_format_buffer[SOCKET_IPADDRSTR_LEN];
+
+   struct in6_addr peerIP;
    int boundPort;
 
    const struct SocketOps* ops;
@@ -57,22 +66,6 @@ struct Socket
       short revents;
    } poll;
 };
-
-
-static inline NicAddrType_t Socket_getSockType(Socket* this)
-{
-   return this->sockType;
-}
-
-static inline char* Socket_getPeername(Socket* this)
-{
-   return this->peername;
-}
-
-static inline struct in_addr Socket_getPeerIP(Socket* this)
-{
-   return this->peerIP;
-}
 
 /**
  * Calls the virtual uninit method and kfrees the object.
@@ -179,7 +172,7 @@ static inline ssize_t Socket_recvExactT_kernel(Socket* this, void *buf, size_t l
 
 
 static inline ssize_t Socket_sendto_kernel(Socket *this, const void *buf, size_t len, int flags,
-   fhgfs_sockaddr_in *to)
+   struct sockaddr_in6 *to)
 {
    struct iov_iter *iter = STACK_ALLOC_BEEGFS_ITER_KVEC(buf, len, WRITE);
    return this->ops->sendto(this, iter, flags, to);

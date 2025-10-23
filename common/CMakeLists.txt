@@ -17,6 +17,7 @@ link_directories(
 add_library(
 	beegfs-common STATIC
 	./source/common/Assert.cpp
+	./source/common/Common.cpp
 	./source/common/toolkit/StorageTk.h
 	./source/common/toolkit/RandomReentrant.h
 	./source/common/toolkit/FsckTk.cpp
@@ -48,7 +49,6 @@ add_library(
 	./source/common/toolkit/serialization/SerializeStr.cpp
 	./source/common/toolkit/OfflineWaitTimeoutTk.h
 	./source/common/toolkit/AcknowledgmentStore.cpp
-	./source/common/toolkit/SocketTk.h
 	./source/common/toolkit/HashTk.cpp
 	./source/common/toolkit/AtomicObjectReferencer.h
 	./source/common/toolkit/poll/PollList.cpp
@@ -69,7 +69,6 @@ add_library(
 	./source/common/toolkit/FDHandle.h
 	./source/common/toolkit/ListTk.h
 	./source/common/toolkit/LockFD.cpp
-	./source/common/toolkit/SocketTk.cpp
 	./source/common/toolkit/SynchronizedCounter.h
 	./source/common/toolkit/TimeTk.h
 	./source/common/toolkit/NetFilter.h
@@ -91,6 +90,8 @@ add_library(
 	./source/common/Common.h
 	./source/common/benchmark/StorageBench.h
 	./source/common/NumericID.h
+	./source/common/net/sock/IPAddress.h
+	./source/common/net/sock/IPAddress.cpp
 	./source/common/net/sock/SocketDisconnectException.h
 	./source/common/net/sock/Socket.cpp
 	./source/common/net/sock/SocketTimeoutException.h
@@ -531,6 +532,8 @@ if(NOT BEEGFS_SKIP_TESTS)
 	add_executable(
 		test-common
 		./tests/TestIPv4Network.cpp
+		./tests/TestIPAddress.cpp
+		./tests/TestUint128.cpp
 		./tests/TestUiTk.cpp
 		./tests/TestPreallocatedFile.cpp
 		./tests/TestRWLock.cpp

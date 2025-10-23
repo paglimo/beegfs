@@ -259,11 +259,8 @@ NodeType Node_getNodeType(Node* this)
  */
 const char* Node_getNodeTypeStr(Node* this)
 {
-   const char* nodeType;
-   RWLock_readLock(&this->aliasAndTypeMu);
-   nodeType = Node_nodeTypeToStr(this->nodeType);
-   RWLock_readUnlock(&this->aliasAndTypeMu);
-   return nodeType;
+   NodeType nodeType = Node_getNodeType(this);
+   return Node_nodeTypeToStr(nodeType);
 }
 
 #endif /*NODE_H_*/

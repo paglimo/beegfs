@@ -28,6 +28,7 @@ const char* const Logger::LogTopics[LogTopic_INVALID] =
    "event-logger",
    "database",
    "socklib",
+   "chunkbalancing"
 };
 
 static const int syslogLevelMapping[Log_LEVELMAX] = { LOG_ERR, LOG_CRIT, LOG_WARNING, 

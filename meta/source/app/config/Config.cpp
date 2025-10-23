@@ -52,30 +52,33 @@ void Config::loadDefaults(bool addDashes)
    configMapRedefine("storeClientXAttrs",          "false");
    configMapRedefine("storeClientACLs",            "false");
 
-   configMapRedefine("sysTargetAttachmentFile",    "");
-   configMapRedefine("tuneNumStreamListeners",     "1");
-   configMapRedefine("tuneNumWorkers",             "0");
-   configMapRedefine("tuneWorkerBufSize",          "1m");
-   configMapRedefine("tuneNumCommSlaves",          "0");
-   configMapRedefine("tuneCommSlaveBufSize",       "1m");
-   configMapRedefine("tuneDefaultChunkSize",       "512k");
-   configMapRedefine("tuneDefaultNumStripeTargets","4");
-   configMapRedefine("tuneProcessFDLimit",         "50000");
-   configMapRedefine("tuneWorkerNumaAffinity",     "false");
-   configMapRedefine("tuneListenerNumaAffinity",   "false");
-   configMapRedefine("tuneBindToNumaZone",         "");
-   configMapRedefine("tuneListenerPrioShift",      "-1");
-   configMapRedefine("tuneDirMetadataCacheLimit",  "1024");
-   configMapRedefine("tuneTargetChooser",          TARGETCHOOSERTYPE_RANDOMIZED_STR);
-   configMapRedefine("tuneLockGrantWaitMS",        "333");
-   configMapRedefine("tuneLockGrantNumRetries",    "15");
-   configMapRedefine("tuneRotateMirrorTargets",    "false");
-   configMapRedefine("tuneEarlyUnlinkResponse",    "true");
-   configMapRedefine("tuneUsePerUserMsgQueues",    "false");
-   configMapRedefine("tuneUseAggressiveStreamPoll","false");
-   configMapRedefine("tuneNumResyncSlaves",        "12");
-   configMapRedefine("tuneMirrorTimestamps",        "true");
-   configMapRedefine("tuneDisposalGCPeriod",       "0");
+   configMapRedefine("sysTargetAttachmentFile",          "");
+   configMapRedefine("tuneNumStreamListeners",           "1");
+   configMapRedefine("tuneNumWorkers",                   "0");
+   configMapRedefine("tuneWorkerBufSize",                "1m");
+   configMapRedefine("tuneNumCommSlaves",                "0");
+   configMapRedefine("tuneCommSlaveBufSize",             "1m");
+   configMapRedefine("tuneDefaultChunkSize",             "512k");
+   configMapRedefine("tuneDefaultNumStripeTargets",      "4");
+   configMapRedefine("tuneProcessFDLimit",               "50000");
+   configMapRedefine("tuneWorkerNumaAffinity",           "false");
+   configMapRedefine("tuneListenerNumaAffinity",         "false");
+   configMapRedefine("tuneBindToNumaZone",               "");
+   configMapRedefine("tuneListenerPrioShift",            "-1");
+   configMapRedefine("tuneDirMetadataCacheLimit",        "1024");
+   configMapRedefine("tuneTargetChooser",                TARGETCHOOSERTYPE_RANDOMIZED_STR);
+   configMapRedefine("tuneLockGrantWaitMS",              "333");
+   configMapRedefine("tuneLockGrantNumRetries",          "15");
+   configMapRedefine("tuneRotateMirrorTargets",          "false");
+   configMapRedefine("tuneEarlyUnlinkResponse",          "true");
+   configMapRedefine("tuneUsePerUserMsgQueues",          "false");
+   configMapRedefine("tuneUseAggressiveStreamPoll",      "false");
+   configMapRedefine("tuneNumResyncSlaves",              "12");
+   configMapRedefine("tuneMirrorTimestamps",             "true");
+   configMapRedefine("tuneDisposalGCPeriod",             "0");
+   configMapRedefine("tuneChunkBalanceQueueLimit",       "100000");
+   configMapRedefine("tuneChunkBalanceLockingTimeLimit", "300");
+
 
    configMapRedefine("quotaEarlyChownResponse",    "true");
    configMapRedefine("quotaEnableEnforcement",     "false");
@@ -205,7 +208,11 @@ void Config::applyConfigMap(bool enableException, bool addDashes)
       else if (iter->first == std::string("tuneMirrorTimestamps"))
          tuneMirrorTimestamps = StringTk::strToBool(iter->second);
       else if(iter->first == std::string("tuneDisposalGCPeriod"))
-          tuneDisposalGCPeriod = StringTk::strToUInt(iter->second);
+         tuneDisposalGCPeriod = StringTk::strToUInt(iter->second);
+      else if(iter->first == std::string("tuneChunkBalanceQueueLimit"))
+         tuneChunkBalanceQueueLimit = StringTk::strToUInt(iter->second);
+      else if(iter->first == std::string("tuneChunkBalanceLockingTimeLimit"))
+         tuneChunkBalanceLockingTimeLimit = StringTk::strToUInt(iter->second);
       else if (iter->first == std::string("sysFileEventLogTarget"))
          sysFileEventLogTarget = iter->second;
       else if (iter->first == std::string("sysFileEventPersistDirectory"))

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <common/threading/PThread.h>
 #include <common/app/AbstractApp.h>
 #include <common/toolkit/MessagingTk.h>
@@ -6,12 +7,13 @@
 #include <common/toolkit/TimeAbs.h>
 #include <common/net/message/control/DummyMsg.h>
 #include "AbstractDatagramListener.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <mutex>
 
 AbstractDatagramListener::AbstractDatagramListener(const std::string& threadName,
    NetFilter* netFilter, NicAddressList& localNicList, AcknowledgmentStore* ackStore,
-   unsigned short udpPort, bool restrictOutboundInterfaces)
+   uint16_t udpPort, bool restrictOutboundInterfaces)
     : PThread(threadName),
       log(threadName),
       netFilter(netFilter),
@@ -35,13 +37,12 @@ AbstractDatagramListener::~AbstractDatagramListener()
 
 void AbstractDatagramListener::configSocket(StandardSocket* s, NicAddress* nicAddr, int bufsize)
 {
-   s->setSoBroadcast(true);
    s->setSoReuseAddr(true);
    if (bufsize > 0)
       s->setSoRcvBuf(bufsize);
 
    if (nicAddr)
-      s->bindToAddr(nicAddr->ipAddr.s_addr, udpPort);
+      s->bindToAddr(nicAddr->ipAddr.toSocketAddress(udpPort));
    else
       s->bind(udpPort);
 
@@ -53,20 +54,19 @@ void AbstractDatagramListener::configSocket(StandardSocket* s, NicAddress* nicAd
    */
    if(udpPort == 0)
    { // find out which port we are actually using
-      sockaddr_in bindAddr;
+      struct sockaddr_storage bindAddr;
       socklen_t bindAddrLen = sizeof(bindAddr);
 
-      int getSockNameRes = getsockname(s->getFD(), (sockaddr*)&bindAddr, &bindAddrLen);
+      int getSockNameRes = getsockname(s->getFD(), reinterpret_cast<struct sockaddr*>(&bindAddr), &bindAddrLen);
       if(getSockNameRes == -1)
          throw SocketException("getsockname() failed: " + System::getErrString() );
 
-      udpPortNetByteOrder = bindAddr.sin_port;
-      udpPort = htons(bindAddr.sin_port);
+      udpPort = extractPort(reinterpret_cast<const sockaddr*>(&bindAddr));
    }
 
    std::string ifname;
    if (nicAddr)
-      ifname = Socket::ipaddrToStr(nicAddr->ipAddr);
+      ifname = nicAddr->ipAddr;
    else
       ifname = "any";
 
@@ -86,7 +86,6 @@ bool AbstractDatagramListener::initSocks()
    try
    {
       udpPortNetByteOrder = htons(udpPort);
-      loopbackAddrNetByteOrder = htonl(INADDR_LOOPBACK);
 
       if (restrictOutboundInterfaces)
       {
@@ -103,12 +102,12 @@ bool AbstractDatagramListener::initSocks()
                std::shared_ptr<StandardSocket> s;
                if (udpSock == nullptr)
                {
-                  udpSock = std::make_shared<StandardSocketGroup>(PF_INET, SOCK_DGRAM);
+                  udpSock = std::make_shared<StandardSocketGroup>(SOCK_DGRAM);
                   s = udpSock;
                }
                else
                {
-                  s = udpSock->createSubordinate(PF_INET, SOCK_DGRAM);
+                  s = udpSock->createSubordinate(SOCK_DGRAM);
                }
                configSocket(s.get(), &i, bufsize);
                interfaceSocks[i.ipAddr] = s;
@@ -120,7 +119,7 @@ bool AbstractDatagramListener::initSocks()
          // no need to close down any existing unbound UDP socket, it listens to all interfaces
          if (udpSock == nullptr)
          {
-            udpSock = std::make_shared<StandardSocketGroup>(PF_INET, SOCK_DGRAM);
+            udpSock = std::make_shared<StandardSocketGroup>(SOCK_DGRAM);
             configSocket(udpSock.get(), NULL, bufsize);
          }
       }
@@ -152,7 +151,7 @@ void AbstractDatagramListener::initBuffers()
    this->sendBuf = (char*)bufOutVoid;
 }
 
-std::shared_ptr<StandardSocket> AbstractDatagramListener::findSenderSock(struct in_addr addr)
+std::shared_ptr<StandardSocket> AbstractDatagramListener::findSenderSock(const IPAddress& addr)
 {
    std::lock_guard<Mutex> lock(mutex);
    return findSenderSockUnlocked(addr);
@@ -161,34 +160,28 @@ std::shared_ptr<StandardSocket> AbstractDatagramListener::findSenderSock(struct 
 /**
  * mutex must be held.
  */
-std::shared_ptr<StandardSocket> AbstractDatagramListener::findSenderSockUnlocked(struct in_addr addr)
+std::shared_ptr<StandardSocket> AbstractDatagramListener::findSenderSockUnlocked(const IPAddress& addr)
 {
    std::shared_ptr<StandardSocket> sock = udpSock;
    if (restrictOutboundInterfaces)
    {
-      if (addr.s_addr != loopbackAddrNetByteOrder)
+      IPAddress k;
+      if (auto it { ipSrcMap.find(addr) }; it != std::end(ipSrcMap))
       {
-         struct in_addr k;
-         if (auto it { ipSrcMap.find(addr) }; it != std::end(ipSrcMap))
-         {
-            k = it->second;
-         }
-         else
-         {
-            if (!routingTable.match(addr, localNicList, k))
-            {
-               k.s_addr = 0;
-               // addr may have come from whoever sent a message, so this is a warning
-               LOG(COMMUNICATION, WARNING, "No routes found.", ("addr", Socket::ipaddrToStr(addr)));
-            }
-            ipSrcMap[addr] = k;
-         }
-
-         sock = interfaceSocks[k];
-         //LOG(COMMUNICATION, DEBUG, "findInterfaceSock", ("addr", Socket::ipaddrToStr(addr.s_addr).c_str()),
-         //   ("k", Socket::ipaddrToStr(k).c_str()), ("sock", sock));
-
+         k = it->second;
       }
+      else
+      {
+         if (!routingTable.match(addr, localNicList, k))
+         {
+            k = IPAddress();
+            // addr may have come from whoever sent a message, so this is a warning
+            LOG(COMMUNICATION, WARNING, "No routes found.", ("addr", addr.toString()));
+         }
+         ipSrcMap[addr] = k;
+      }
+
+      sock = interfaceSocks[k];
    }
 
    return sock;
@@ -222,19 +215,19 @@ void AbstractDatagramListener::run()
 
 void AbstractDatagramListener::listenLoop()
 {
-   struct sockaddr_in fromAddr;
 
-
+   struct sockaddr_storage sas;
+   socklen_t saslen;
    while(!getSelfTerminate() )
    {
-      socklen_t fromAddrLen = sizeof(fromAddr);
-
       try
       {
          ssize_t recvRes = udpSock->recvfromT(
-            recvBuf, DGRAMMGR_RECVBUF_SIZE, 0, (struct sockaddr*)&fromAddr, &fromAddrLen,
+            recvBuf, DGRAMMGR_RECVBUF_SIZE, 0, &sas, &saslen,
             recvTimeoutMS);
-         if(isDGramFromSelf(&fromAddr) )
+         // XXX this is ineffecient
+         IPAddress fromAddr(&sas);
+         if(isDGramFromSelf(fromAddr, extractPort(reinterpret_cast<const sockaddr*>(&sas))))
          { // note: important if we're sending msgs to all hosts and don't want to include ourselves
             //log.log(Log_SPAM, "Discarding DGram from localhost");
             continue;
@@ -249,11 +242,11 @@ void AbstractDatagramListener::listenLoop()
                || msg->getSequenceNumberDone() != 0)
          {
             LOG(COMMUNICATION, NOTICE, "Received invalid message from peer",
-                  ("peer", Socket::ipaddrToStr(fromAddr.sin_addr)));
+               ("peer", fromAddr.toString()));
          }
          else
          {
-            handleIncomingMsg(&fromAddr, msg.get());
+            handleIncomingMsg(reinterpret_cast<struct sockaddr*>(&sas), msg.get());
          }
       }
       catch(SocketTimeoutException& ste)
@@ -434,7 +427,7 @@ bool AbstractDatagramListener::sendToNodeUDPwithAck(const NodeHandle& node, Ackn
 bool AbstractDatagramListener::sendBufToNode(Node& node, const char* buf, size_t bufLen)
 {
    NicAddressList nicList(node.getNicList() );
-   unsigned short portUDP = node.getPortUDP();
+   uint16_t portUDP = node.getPortUDP();
 
    bool sent = false;
    for(NicAddressListIter iter = nicList.begin(); iter != nicList.end(); iter++)
@@ -442,10 +435,11 @@ bool AbstractDatagramListener::sendBufToNode(Node& node, const char* buf, size_t
       if(iter->nicType != NICADDRTYPE_STANDARD)
          continue;
 
-      if(!netFilter->isAllowed(iter->ipAddr.s_addr) )
+      if(!netFilter->empty() && !std::any_of(netFilter->begin(), netFilter->end(), [&](auto e) {return e.containsAddress(iter->ipAddr);})) {
          continue;
+      }
 
-      if (sendto(buf, bufLen, 0, iter->ipAddr, portUDP) >0)
+      if (sendto(buf, bufLen, 0, iter->ipAddr.toSocketAddress(portUDP)) >0)
          sent = true;
    }
    if (!sent)
@@ -468,13 +462,12 @@ bool AbstractDatagramListener::sendMsgToNode(Node& node, NetMessage* msg)
  */
 void AbstractDatagramListener::sendDummyToSelfUDP()
 {
-   in_addr hostAddr;
-   hostAddr.s_addr = loopbackAddrNetByteOrder;
+   IPAddress hostAddr(htonl(INADDR_LOOPBACK));
 
    DummyMsg msg;
    const auto msgBuf = MessagingTk::createMsgVec(msg);
 
-   this->sendto(&msgBuf[0], msgBuf.size(), 0, hostAddr, udpPort);
+   this->sendto(&msgBuf[0], msgBuf.size(), 0, hostAddr.toSocketAddress(udpPort));
 }
 
 /**
@@ -485,20 +478,20 @@ unsigned AbstractDatagramListener::incAckCounter()
    return ackCounter.increase();
 }
 
-bool AbstractDatagramListener::isDGramFromSelf(struct sockaddr_in* fromAddr)
+bool AbstractDatagramListener::isDGramFromSelf(const IPAddress& fromAddr, uint16_t port)
 {
-   if(fromAddr->sin_port != udpPortNetByteOrder)
+   if (port != udpPort)
       return false;
 
-   if (loopbackAddrNetByteOrder == fromAddr->sin_addr.s_addr)
+   if (fromAddr.isLoopback())
       return true;
 
    const std::lock_guard<Mutex> lock(mutex);
    for(NicAddressListIter iter = localNicList.begin(); iter != localNicList.end(); iter++)
    {
-      //LogContext("isDGramFromSelf").log(Log_DEBUG, std::string("fromAddr=") + Socket::ipaddrToStr(&fromAddr->sin_addr)
-      //+ " nic=" + Socket::ipaddrToStr(&iter->ipAddr));
-      if(iter->ipAddr.s_addr == fromAddr->sin_addr.s_addr)
+      //LogContext("isDGramFromSelf").log(Log_DEBUG, std::string("fromAddr=") + fromAddr.toStr()
+      //+ " nic=" + iter->ipAddr.toStr());
+      if(iter->ipAddr == fromAddr)
          return true;
    }
 

@@ -99,7 +99,7 @@ ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufIn
    { // socket error
       Logger* log = App_getLogger(app);
       Logger_logFormatted(log, Log_DEBUG, logContext, "Failed to receive message header from: %s",
-         Socket_getPeername(sock) );
+         sock->peername);
 
       goto socket_exception;
    }
@@ -117,7 +117,7 @@ ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufIn
       Logger* log = App_getLogger(app);
       Logger_logFormatted(log, Log_WARNING, logContext,
          "Received a message that is too large from: %s (bufLen: %lld, msgLen: %lld)",
-         Socket_getPeername(sock), (long long)bufInLen, (long long)msgLength);
+         sock->peername, (long long)bufInLen, (long long)msgLength);
 
       return -EMSGSIZE;
    }
@@ -142,7 +142,7 @@ ssize_t MessagingTk_recvMsgBuf(App* app, Socket* sock, char* bufIn, size_t bufIn
       else
          Logger_logFormatted(log, Log_DEBUG, logContext,
             "Receive failed from: %s (ErrCode: %lld)",
-            Socket_getPeername(sock), (long long)recvRes);
+            sock->peername, (long long)recvRes);
    }
 
    return recvRes;

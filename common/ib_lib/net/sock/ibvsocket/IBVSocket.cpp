@@ -1,5 +1,7 @@
 #include "IBVSocket.h"
+#include "common/net/sock/IPAddress.h"
 
+#include <cerrno>
 #include <sys/epoll.h>
 
 #include <common/app/log/Logger.h>
@@ -45,7 +47,7 @@
 
 void IBVSocket_init(IBVSocket* _this)
 {
-   memset(_this, 0, sizeof(*_this) );
+   *_this = {0};
 
    _this->sockValid = false;
    _this->epollFD = -1;
@@ -79,7 +81,7 @@ void IBVSocket_init(IBVSocket* _this)
 void __IBVSocket_initFromCommContext(IBVSocket* _this, struct rdma_cm_id* cm_id,
    IBVCommContext* commContext)
 {
-   memset(_this, 0, sizeof(*_this) );
+   *_this = {0};
 
    _this->sockValid = false;
    _this->epollFD = -1;
@@ -173,18 +175,16 @@ void IBVSocket_fork_init_once()
    ibv_fork_init();
 }
 
-bool IBVSocket_connectByName(IBVSocket* _this, const char* hostname, unsigned short port,
-   IBVCommConfig* commCfg)
+bool IBVSocket_connectByName(IBVSocket* _this, const char* hostname, uint16_t port,
+   sa_family_t ai_family, IBVCommConfig* commCfg)
 {
    struct addrinfo *res;
-   struct addrinfo hints;
+   struct addrinfo hints = {};
+   hints.ai_family = ai_family;
+   hints.ai_socktype = SOCK_STREAM;
 
    int getInfoRes;
-   struct in_addr ipaddress;
-
-   memset(&hints, 0, sizeof(hints) );
-   hints.ai_family = PF_INET;
-   hints.ai_socktype = SOCK_STREAM;
+   IPAddress ipaddress;
 
    getInfoRes = getaddrinfo(hostname, NULL, &hints, &res);
 
@@ -196,21 +196,19 @@ bool IBVSocket_connectByName(IBVSocket* _this, const char* hostname, unsigned sh
       return false;
    }
 
-   ipaddress.s_addr = ( (struct sockaddr_in*)res->ai_addr)->sin_addr.s_addr;
+   ipaddress.setAddr(res->ai_addr);
 
 
    // clean-up
    freeaddrinfo(res);
 
 
-   return IBVSocket_connectByIP(_this, ipaddress, port, commCfg);
+   return IBVSocket_connectByIP(_this, ipaddress.toSocketAddress(port), commCfg);
 }
 
-bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress, unsigned short port,
-   IBVCommConfig* commCfg)
+bool IBVSocket_connectByIP(IBVSocket* _this, const SocketAddress& ipaddress, IBVCommConfig* commCfg)
 {
    struct rdma_cm_event* event;
-   struct sockaddr_in sin;
    bool createContextRes;
    struct rdma_conn_param conn_param;
    bool parseCommDestRes;
@@ -221,16 +219,20 @@ bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress, unsigned 
    int oldChannelFlags;
    int setOldFlagsRes;
 
-   LOG(SOCKLIB, DEBUG, "Connect RDMASocket", ("socket", _this), ("addr", Socket::endpointAddrToStr(ipaddress, port)),
-      ("bindIP", Socket::ipaddrToStr(_this->bindIP)));
+   LOG(SOCKLIB, DEBUG, "Connect RDMASocket", ("socket", _this), ("addr", ipaddress.toString()),
+      ("bindIP", _this->bindIP.toString()));
 
    // resolve IP address...
+   int res = 1;
+   if (ipaddress.addr.isIPv4()) {
+      sockaddr_in sa = ipaddress.toIPv4Sockaddr();
+      res = rdma_resolve_addr(_this->cm_id, NULL, reinterpret_cast<struct sockaddr*>(&sa), _this->timeoutCfg.connectMS);
+   } else {
+      sockaddr_in6 sa = ipaddress.toSockaddr();
+      res = rdma_resolve_addr(_this->cm_id, NULL, reinterpret_cast<struct sockaddr*>(&sa), _this->timeoutCfg.connectMS);
+   }
 
-   sin.sin_addr.s_addr = ipaddress.s_addr;
-   sin.sin_family = AF_INET;
-   sin.sin_port = htons(port);
-
-   if(rdma_resolve_addr(_this->cm_id, NULL, (struct sockaddr*)&sin, _this->timeoutCfg.connectMS) )
+   if(res)
    {
       LOG(SOCKLIB, WARNING, "rdma_resolve_addr failed.");
       goto err_invalidateSock;
@@ -427,31 +429,33 @@ err_invalidateSock:
 /**
  * @return true on success
  */
-bool IBVSocket_bind(IBVSocket* _this, unsigned short port)
+bool IBVSocket_bind(IBVSocket* _this, uint16_t port)
 {
-   in_addr_t ipAddr = INADDR_ANY;
-
-   return IBVSocket_bindToAddr(_this, ipAddr, port);
+   IPAddress ipAddr(htonl(INADDR_ANY));
+   return IBVSocket_bindToAddr(_this, ipAddr.toSocketAddress(port));
 }
 
-bool IBVSocket_bindToAddr(IBVSocket* _this, in_addr_t ipAddr, unsigned short port)
+bool IBVSocket_bindToAddr(IBVSocket* _this, const SocketAddress& ipAddr)
 {
-   struct sockaddr_in bindAddr;
+   LOG(SOCKLIB, DEBUG, "Bind RDMASocket", ("socket", _this), ("addr", ipAddr.toString()));
 
-   bindAddr.sin_family = AF_INET;
-   bindAddr.sin_addr.s_addr = ipAddr;
-   bindAddr.sin_port = htons(port);
+   int res = 1;
+   if (ipAddr.addr.isIPv4()) {
+      sockaddr_in sa = ipAddr.toIPv4Sockaddr();
+      res = rdma_bind_addr(_this->cm_id, reinterpret_cast<struct sockaddr*>(&sa));
+   } else {
+      sockaddr_in6 sa = ipAddr.toSockaddr();
+      res = rdma_bind_addr(_this->cm_id, reinterpret_cast<struct sockaddr*>(&sa));
+   }
 
-   LOG(SOCKLIB, DEBUG, "Bind RDMASocket", ("socket", _this), ("addr", Socket::endpointAddrToStr(ipAddr, port)));
-
-   if(rdma_bind_addr(_this->cm_id, (struct sockaddr*)&bindAddr) )
+   if(res)
    {
       //SyslogLogger::log(LOG_WARNING, "%s:%d rdma_bind_addr failed (port: %d)\n",
          //__func__, __LINE__,  (int)port); // debug in
       goto err_invalidateSock;
    }
 
-   _this->bindIP.s_addr = ipAddr;
+   _this->bindIP = ipAddr.addr;
 
    return true;
 
@@ -501,7 +505,7 @@ err_invalidateSock:
  * @return ACCEPTRES_IGNORE in case an irrelevant event occurred
  */
 IBVSocket_AcceptRes IBVSocket_accept(IBVSocket* _this, IBVSocket** outAcceptedSock,
-   struct sockaddr* peerAddr, socklen_t* peerAddrLen)
+   struct sockaddr_storage* peerAddr, socklen_t* peerAddrLen)
 {
    struct rdma_cm_event* event = NULL;
    IBVCommContext* childCommContext = NULL;
@@ -631,9 +635,9 @@ IBVSocket_AcceptRes IBVSocket_accept(IBVSocket* _this, IBVSocket** outAcceptedSo
       case RDMA_CM_EVENT_ESTABLISHED:
       {
          // received 'established' (this is what we've actually been waiting for!)
-
-         *peerAddrLen = sizeof(struct sockaddr_in);
-         memcpy(peerAddr, &event->id->route.addr.dst_addr, *peerAddrLen);
+         
+         memcpy(peerAddr, &event->id->route.addr.dst_storage, sizeof(*peerAddr));
+         *peerAddrLen = sockAddrLen(reinterpret_cast<const sockaddr*>(peerAddr));
 
          *outAcceptedSock = (IBVSocket*)event->id->context;
 

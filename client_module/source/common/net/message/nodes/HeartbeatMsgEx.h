@@ -18,7 +18,7 @@ extern void __HeartbeatMsgEx_processIncomingRoot(HeartbeatMsgEx* this, struct Ap
 extern void HeartbeatMsgEx_serializePayload(NetMessage* this, SerializeCtx* ctx);
 extern bool HeartbeatMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx);
 extern bool __HeartbeatMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 
 // inliners
 static inline void HeartbeatMsgEx_parseNicList(HeartbeatMsgEx* this,

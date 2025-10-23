@@ -1,6 +1,7 @@
 #pragma once
 
 #include <common/Common.h>
+#include <common/toolkit/UInt128.h>
 #include <common/threading/Atomics.h>
 
 #include "Byteswap.h"
@@ -49,6 +50,7 @@ struct IsSerdesPrimitive {
          || boost::is_same<value_type, uint32_t>::value
          || boost::is_same<value_type, int64_t>::value
          || boost::is_same<value_type, uint64_t>::value
+         || boost::is_same<value_type, uint128_t>::value
    };
 };
 
@@ -220,6 +222,7 @@ class Serializer
       void putIntegral(uint32_t value) { putRaw(HOST_TO_LE_32(value) ); }
       void putIntegral(int64_t value) { putRaw(HOST_TO_LE_64(value) ); }
       void putIntegral(uint64_t value) { putRaw(HOST_TO_LE_64(value) ); }
+      void putIntegral(uint128_t value) { putRaw(HOST_TO_LE_128(value) ); }
 
       template<typename Raw>
       void putRaw(Raw value)
@@ -437,6 +440,7 @@ class Deserializer
       void getIntegral(uint16_t& value) { value = LE_TO_HOST_16(getRaw<uint16_t>() ); }
       void getIntegral(uint32_t& value) { value = LE_TO_HOST_32(getRaw<uint32_t>() ); }
       void getIntegral(uint64_t& value) { value = LE_TO_HOST_64(getRaw<uint64_t>() ); }
+      void getIntegral(uint128_t& value) { value = LE_TO_HOST_128(getRaw<uint128_t>() ); }
 
       void getIntegral(int16_t& value)
       {

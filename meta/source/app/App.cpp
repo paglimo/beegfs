@@ -19,6 +19,9 @@
 #include <toolkit/BuddyCommTk.h>
 #include <toolkit/StorageTkEx.h>
 #include "App.h"
+#include "common/app/config/AbstractConfig.h"
+#include "common/app/config/ICommonConfig.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <array>
 #include <mntent.h>
@@ -48,8 +51,6 @@ App::App(int argc, char** argv)
    this->appResult = APPCODE_NO_ERROR;
 
    this->cfg = NULL;
-   this->netFilter = NULL;
-   this->tcpOnlyFilter = NULL;
    this->log = NULL;
    this->mgmtNodes = NULL;
    this->metaNodes = NULL;
@@ -85,6 +86,7 @@ App::App(int argc, char** argv)
    this->timerQueue = new TimerQueue(1, 1);
    this->gcQueue = new TimerQueue(1, 1);
    this->buddyResyncer = NULL;
+   this->chunkBalancerJob = NULL;
 
    this->nextNumaBindTarget = 0;
 }
@@ -138,8 +140,7 @@ App::~App()
    SAFE_DELETE(this->targetStateStore);
    SAFE_DELETE(this->metaCapacityPools);
    SAFE_DELETE(this->log);
-   SAFE_DELETE(this->tcpOnlyFilter);
-   SAFE_DELETE(this->netFilter);
+   SAFE_DELETE(this->chunkBalancerJob);
 
    SAFE_DELETE(this->cfg);
 
@@ -458,7 +459,7 @@ void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 
    if(cfg->getConnUseRDMA() && RDMASocket::rdmaDevicesExist() )
    {
-      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(outList);
+      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(this->allowedInterfaces, outList);
       if (foundRdmaInterfaces)
          outList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces}); // re-sort the niclist
    }
@@ -467,7 +468,7 @@ void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 void App::findAllowedInterfaces(NicAddressList& outList) const
 {
    // discover local NICs and filter them
-   NetworkInterfaceCard::findAllInterfaces(allowedInterfaces, outList);
+   NetworkInterfaceCard::findAll(&allowedInterfaces, false, cfg->getConnDisableIPv6(), &outList);
    outList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces});
 }
 
@@ -478,13 +479,16 @@ void App::findAllowedInterfaces(NicAddressList& outList) const
  */
 void App::initBasicNetwork()
 {
+   // Detect ipv6
+   Socket::checkAndCacheIPv6Availability(cfg->getConnMetaPort(), cfg->getConnDisableIPv6());
+
    // check if management host is defined
    if(!cfg->getSysMgmtdHost().length() )
       throw InvalidConfigException("Management host undefined");
 
    // prepare filter for outgoing packets/connections
-   this->netFilter = new NetFilter(cfg->getConnNetFilterFile() );
-   this->tcpOnlyFilter = new NetFilter(cfg->getConnTcpOnlyFilterFile() );
+   this->netFilter = loadNetworkList(cfg->getConnNetFilterFile());
+   this->tcpOnlyFilter = loadNetworkList(cfg->getConnTcpOnlyFilterFile());
 
    // prepare filter for interfaces
    std::string interfacesList = cfg->getConnInterfacesList();
@@ -499,7 +503,7 @@ void App::initBasicNetwork()
    if(localNicList.empty() )
       throw InvalidConfigException("Couldn't find any usable NIC");
 
-   noDefaultRouteNets = std::make_shared<NetVector>();
+   noDefaultRouteNets = std::make_shared<NetFilter>();
    if(!initNoDefaultRouteList(noDefaultRouteNets.get()))
       throw InvalidConfigException("Failed to parse connNoDefaultRoute");
 
@@ -859,7 +863,7 @@ void App::initComponents(TargetConsistencyState initialConsistencyState)
 
    NicAddressList nicList = getLocalNicList();
    this->dgramListener = new DatagramListener(
-      netFilter, nicList, ackStore, cfg->getConnMetaPort(),
+      &netFilter, nicList, ackStore, cfg->getConnMetaPort(),
       this->cfg->getConnRestrictOutboundInterfaces() );
    if(cfg->getTuneListenerPrioShift() )
       dgramListener->setPriorityShift(cfg->getTuneListenerPrioShift() );
@@ -947,6 +951,9 @@ void App::stopComponents()
    // before the workers are stopped.
    if(buddyResyncer)
       buddyResyncer->shutdown();
+
+   if(chunkBalancerJob)
+      chunkBalancerJob->shutdown();
 
    workersStop();
 
@@ -1236,16 +1243,16 @@ void App::logInfos()
    logUsableNICs(log, nicList);
 
    // print net filters
-   if(netFilter->getNumFilterEntries() )
+   if(!netFilter.empty())
    {
       log->log(Log_WARNING, std::string("Net filters: ") +
-         StringTk::uintToStr(netFilter->getNumFilterEntries() ) );
+         StringTk::uintToStr(netFilter.size()));
    }
 
-   if(tcpOnlyFilter->getNumFilterEntries() )
+   if(!tcpOnlyFilter.empty())
    {
       this->log->log(Log_WARNING, std::string("TCP-only filters: ") +
-         StringTk::uintToStr(tcpOnlyFilter->getNumFilterEntries() ) );
+         StringTk::uintToStr(tcpOnlyFilter.size()));
    }
 
    // print numa info
@@ -1357,7 +1364,7 @@ bool App::waitForMgmtNode()
    std::string mgmtdHost = cfg->getSysMgmtdHost();
    NicAddressList nicList = getLocalNicList();
 
-   RegistrationDatagramListener regDGramLis(netFilter, nicList, ackStore, udpListenPort,
+   RegistrationDatagramListener regDGramLis(&netFilter, nicList, ackStore, udpListenPort,
       this->cfg->getConnRestrictOutboundInterfaces());
    regDGramLis.start();
 
@@ -1483,7 +1490,7 @@ bool App::downloadMgmtInfo(TargetConsistencyState& outInitialConsistencyState)
    NicAddressList nicList = getLocalNicList();
 
    // start temporary registration datagram listener
-   RegistrationDatagramListener regDGramLis(netFilter, nicList, ackStore, udpListenPort,
+   RegistrationDatagramListener regDGramLis(&netFilter, nicList, ackStore, udpListenPort,
       this->cfg->getConnRestrictOutboundInterfaces() );
    regDGramLis.start();
 

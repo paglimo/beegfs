@@ -69,8 +69,14 @@ a client config file ('cfgFile')."
   exit 1
 }
 
-# Resolve management address
+# Resolve management address. Since adding IPv6 support, we try "ahostsv6" when "ahostsv4" fails.
+# We could in fact decide to use only "ahostsv6" since this will return an IPv4-mapped IPv6 address
+# when only an IPv4 address could be found. But to not rock the boat too much, for now we will first
+# try "ahostsv4".
 MGMTD_ADDR=$(getent ahostsv4 "$HOST_NAME" | cut -f1 -d' ' | head -n1)
+[[ -n "$MGMTD_ADDR" ]] || {
+  MGMTD_ADDR=$(getent ahostsv6 "$HOST_NAME" | cut -f1 -d' ' | head -n1)
+}
 
 # If resolve fails, error out
 [[ -n "$MGMTD_ADDR" ]] || {

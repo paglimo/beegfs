@@ -6,15 +6,6 @@
 
 #include <common/toolkit/Time.h>
 
-struct fhgfs_sockaddr_in
-{
-   struct in_addr addr;
-   __be16 port;
-};
-typedef struct fhgfs_sockaddr_in fhgfs_sockaddr_in;
-
-
-
 struct fhgfs_stat
 {
    umode_t mode;

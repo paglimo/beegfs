@@ -146,7 +146,7 @@ CXXFLAGS_DEBUG = -O1 -D_FORTIFY_SOURCE=2 \
    -DDEBUG_BACKTRACE  -DLOG_DEBUG_MESSAGES
 CXXFLAGS_COVERAGE = --coverage -O1 -fno-inline
 
-LDFLAGS = -std=c++1y \
+LDFLAGS = \
    -rdynamic \
    -pthread -lrt \
    -Wl,-rpath,'$$ORIGIN/../lib' \

@@ -43,24 +43,19 @@ bool MapTargetsMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx)
 }
 
 bool __MapTargetsMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "MapTargetsMsg incoming";
 
    MapTargetsMsgEx* thisCast = (MapTargetsMsgEx*)this;
 
-   const char* peer;
-
    TargetMapper* targetMapper = App_getTargetMapper(app);
    NumNodeID nodeID = MapTargetsMsgEx_getNodeID(thisCast);
    struct TargetPoolMapping* mapping;
 
-
-   peer = fromAddr ?
-      SocketTk_ipaddrToStr(fromAddr->addr) : StringTk_strDup(Socket_getPeername(sock) );
-   LOG_DEBUG_FORMATTED(log, 4, logContext, "Received a MapTargetsMsg from: %s", peer);
-   kfree(peer);
+   LOG_DEBUG_FORMATTED(log, 4, logContext, "Received a MapTargetsMsg from: %s",
+         Socket_formatAddrOrPeername(fromAddr, sock));
 
    IGNORE_UNUSED_VARIABLE(log);
    IGNORE_UNUSED_VARIABLE(logContext);

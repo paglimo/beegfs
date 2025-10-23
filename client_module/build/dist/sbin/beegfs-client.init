@@ -72,14 +72,17 @@ handle_selinux()
 {
    selinuxenabled 2>/dev/null || return
 
-   # we do not support SELINUX right now and it only causes trouble, so
-   # we try to deactivate it
-   SELINUX_OPT="fscontext=system_u:object_r:tmp_t:s0"
+   # SELinux is now supported with BeeGFS if properly configured:
+   # - /etc/beegfs/beegfs-meta.conf: storeClientXAttrs = true
+   # - /etc/beegfs/beegfs-client.conf: sysSelinuxEnabled = true
+
+   SELINUX_OPT="fscontext=system_u:object_r:fs_t:s0"
 
    echo
-   echo "WARNING: SELINUX IS ENABLED. BeeGFS might not work!"
-   echo "         Before you consider to contact BeeGFS support, please try to"
-   echo "         disable selinux (Usually in /etc/selinux/config)!"
+   echo "WARNING: SELINUX IS ENABLED. BeeGFS requires proper configuration to work with SELinux."
+   echo "         Ensure the following settings are applied:"
+   echo "           - storeClientXAttrs = true (in beegfs-meta.conf)"
+   echo "           - sysSelinuxEnabled = true (in beegfs-client.conf)"
    echo
 }
 
@@ -119,15 +122,21 @@ build_beegfs()
               fstype=`cat ${dir}/build/${BUILD_FSTYPE_FILE}`
               TARGET_PARAM="TARGET=${fstype}"
           else
+              fstype="$DEFAULT_FS_TYPE"               
               TARGET_PARAM=""
           fi
 
           set -e
 
-          MAKE_ARGS="KMOD_INST_DIR=/lib/modules/$(uname -r)/updates/fs/beegfs_autobuild"
+          KMOD_INST_DIR="/lib/modules/$(uname -r)/updates/fs/beegfs_autobuild"
+          MAKE_ARGS="KMOD_INST_DIR=$KMOD_INST_DIR"
           make -C ${dir}/build auto_rebuild_configured ${MAKE_ARGS} ${TARGET_PARAM} --silent
           make -C ${dir}/build clean ${MAKE_ARGS} --silent # always clean up
-
+          
+          # Restore SELinux context if SELinux is enabled (e.g., on RHEL/CentOS systems)
+          if command -v getenforce >/dev/null 2>&1 && [ "$(getenforce)" != "Disabled" ]; then
+              restorecon "$KMOD_INST_DIR/$fstype.ko"
+          fi
       done
 
       set -e # ensure -e here (continue conditions above didn't restore it)

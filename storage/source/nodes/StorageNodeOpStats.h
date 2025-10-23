@@ -33,11 +33,12 @@ class StorageNodeOpStats : public NodeOpStats
        * NOTE: If you need to change something here, don't forget to update the similar method
        *       below.
        */
-      void updateNodeOp(unsigned nodeIP, StorageOpCounterTypes opType, unsigned userID)
+      void updateNodeOp(const IPAddress& nodeIP, StorageOpCounterTypes opType, unsigned userID)
       {
          SafeRWLock safeLock(&lock, SafeRWLock_READ);
+         uint128_t cookieIP = nodeIP.toUint128();
 
-         NodeOpCounterMapIter nodeIter = clientCounterMap.find(nodeIP);
+         NodeOpCounterMapIter nodeIter = clientCounterMap.find(cookieIP);
          NodeOpCounterMapIter userIter = userCounterMap.find(userID);
 
          if( (nodeIter == clientCounterMap.end() ) ||
@@ -50,7 +51,7 @@ class StorageNodeOpStats : public NodeOpStats
             if(nodeIter == clientCounterMap.end() )
             {
                nodeIter = clientCounterMap.insert(
-                  NodeOpCounterMapVal(nodeIP, StorageOpCounter() ) ).first;
+                  NodeOpCounterMapVal(cookieIP, StorageOpCounter() ) ).first;
             }
 
             if(userIter == userCounterMap.end() )
@@ -77,12 +78,13 @@ class StorageNodeOpStats : public NodeOpStats
        * @param opType only StorageOpCounter_WRITEOPS and _READOPS allowed as value, they will be
        * internally converted to the corresponding PerUserStorageOpCounter types.
        */
-      void updateNodeOp(unsigned nodeIP, StorageOpCounterTypes operation, uint64_t bytes,
+      void updateNodeOp(const IPAddress& nodeIP, StorageOpCounterTypes operation, uint64_t bytes,
          unsigned userID)
       {
          SafeRWLock safeLock(&lock, SafeRWLock_READ);
 
-         NodeOpCounterMapIter nodeIter = clientCounterMap.find(nodeIP);
+         uint128_t cookieIP = nodeIP.toUint128();
+         NodeOpCounterMapIter nodeIter = clientCounterMap.find(cookieIP);
          NodeOpCounterMapIter userIter = userCounterMap.find(userID);
 
          if( (nodeIter == clientCounterMap.end() ) ||
@@ -95,7 +97,7 @@ class StorageNodeOpStats : public NodeOpStats
             if(nodeIter == clientCounterMap.end() )
             {
                nodeIter = clientCounterMap.insert(
-                  NodeOpCounterMapVal(nodeIP, StorageOpCounter() ) ).first;
+                  NodeOpCounterMapVal(cookieIP, StorageOpCounter() ) ).first;
             }
 
             if(userIter == userCounterMap.end() )

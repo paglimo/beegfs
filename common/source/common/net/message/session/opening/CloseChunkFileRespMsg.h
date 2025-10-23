@@ -11,7 +11,7 @@ class CloseChunkFileRespMsg : public NetMessageSerdes<CloseChunkFileRespMsg>
          int64_t modificationTimeSecs, int64_t lastAccessTimeSecs, uint64_t storageVersion) :
          BaseType(NETMSGTYPE_CloseChunkFileResp)
       {
-         this->result = (int)result;
+         this->result = (int32_t)result;
          this->filesize = filesize;
          this->allocedBlocks = allocedBlocks;
          this->modificationTimeSecs = modificationTimeSecs;

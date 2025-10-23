@@ -111,7 +111,7 @@ bool HeartbeatMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx)
 }
 
 bool __HeartbeatMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "Heartbeat incoming";
@@ -173,11 +173,14 @@ bool __HeartbeatMsgEx_processIncoming(NetMessage* this, struct App* app,
    HeartbeatMsgEx_parseNicList(thisCast, &nicList);
 
    App_lockNicList(app);
-   node = Node_construct(app,
-      HeartbeatMsgEx_getNodeID(thisCast), HeartbeatMsgEx_getNodeNumID(thisCast),
-      HeartbeatMsgEx_getPortUDP(thisCast), HeartbeatMsgEx_getPortTCP(thisCast), &nicList,
-      nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage? App_getLocalRDMANicListLocked(app) : NULL);
+   {
+      NicAddressList *localNicList = nodeType == NODETYPE_Meta || nodeType == NODETYPE_Storage? App_getLocalRDMANicListLocked(app) : NULL;
+      node = Node_construct(app,
+         HeartbeatMsgEx_getNodeID(thisCast), HeartbeatMsgEx_getNodeNumID(thisCast),
+         HeartbeatMsgEx_getPortUDP(thisCast), HeartbeatMsgEx_getPortTCP(thisCast), &nicList,
+         localNicList);
       // (will belong to the NodeStore => no destruct() required)
+   }
    App_unlockNicList(app);
 
    Node_setNodeAliasAndType(node, NULL, nodeType);

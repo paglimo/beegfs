@@ -143,12 +143,11 @@ static bool NodeConnPool_loadRdmaNicStatsList(NodeConnPool* this)
       NicAddressStatsListIter_init(&stIter, &this->rdmaNicStatsList);
       for(; !NicAddressStatsListIter_end(&stIter); NicAddressStatsListIter_next(&stIter))
       {
-         char* addr;
+         char addr[SOCKET_IPADDRSTR_LEN];
          st = NicAddressStatsListIter_value(&stIter);
-         addr = SocketTk_ipaddrToStr(st->nic.ipAddr);
+         SocketTk_ipaddrToStr(addr, sizeof addr, st->nic.ipAddr);
          Logger_logFormatted(log, Log_DEBUG, logContext, "NIC: %s Addr: %s nicValid=%d established=%d available=%d",
             st->nic.name, addr, st->nicValid, st->established, st->available);
-         kfree(addr);
       }
    }
 #endif
@@ -317,11 +316,12 @@ Socket* NodeConnPool_acquireStreamSocket(NodeConnPool* this)
 Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting,
    DevicePriorityContext* devPrioCtx)
 {
+   App *app = this->app;
    const char* logContext = "NodeConn (acquire stream)";
 
-   Logger* log = App_getLogger(this->app);
-   NetFilter* netFilter = App_getNetFilter(this->app);
-   NetFilter* tcpOnlyFilter = App_getTcpOnlyFilter(this->app);
+   Logger* log = App_getLogger(app);
+   NetFilter* netFilter = App_getNetFilter(app);
+   NetFilter* tcpOnlyFilter = App_getTcpOnlyFilter(app);
 
    Socket* sock = NULL;
    unsigned short port;
@@ -387,8 +387,12 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
          dpc->maxConns = this->maxConns / this->rdmaNicCount;
          srcRdma = NodeConnPool_rdmaNicPriority(this, dpc);
 #ifdef BEEGFS_DEBUG
-         Logger_logTopFormatted(log, LogTopic_CONN, Log_DEBUG, logContext,
-            "Preferred IP addr is 0x%x", srcRdma == NULL? 0 : srcRdma->nic.ipAddr.s_addr);
+         {
+            char ipStr[SOCKET_IPADDRSTR_LEN];
+            SocketTk_ipaddrToStr(ipStr, sizeof ipStr, srcRdma ? srcRdma->nic.ipAddr : in6addr_any);
+            Logger_logTopFormatted(log, LogTopic_CONN, Log_WARNING, logContext,
+                  "Preferred IP addr is %s", ipStr);
+         }
 #endif
       }
    }
@@ -404,7 +408,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
          pooledSock = ConnectionListIter_value(&connIter);
          if (PooledSocket_isAvailable(pooledSock) &&
             (srcRdma == NULL ||
-               (Socket_getSockType((Socket*) pooledSock) == NICADDRTYPE_RDMA
+               (pooledSock->socket.sockType == NICADDRTYPE_RDMA
                   && IBVSocket_getNicStats(&((RDMASocket*) pooledSock)->ibvsock) == srcRdma)))
             break;
          pooledSock = NULL;
@@ -455,9 +459,9 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
 
    for( ; !NicAddressListIter_end(&nicIter); NicAddressListIter_next(&nicIter) )
    {
+      char endpointStr[SOCKET_IPADDRSTR_LEN];
       NicAddress* nicAddr = NicAddressListIter_value(&nicIter);
       const char* nodeTypeStr = Node_getNodeTypeStr(this->parentNode);
-      char* endpointStr;
       bool connectRes;
 
       if(!NetFilter_isAllowed(netFilter, nicAddr->ipAddr) )
@@ -467,38 +471,38 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
          NetFilter_isContained(tcpOnlyFilter, nicAddr->ipAddr) )
          continue;
 
-      endpointStr = SocketTk_endpointAddrToStr(nicAddr->ipAddr, port);
+      SocketTk_endpointToStr(endpointStr, sizeof endpointStr, nicAddr->ipAddr, port);
 
       switch(nicAddr->nicType)
       {
          case NICADDRTYPE_RDMA:
          { // RDMA
-            char from[NICADDRESS_IP_STR_LEN];
-            struct in_addr srcAddr;
+            char from[SOCKET_IPADDRSTR_LEN];
+            struct in6_addr srcAddr;
 
             if(!this->localNicCaps.supportsRDMA)
-               goto continue_clean_endpointStr;
+               goto next_iteration;
 
             if (srcRdma)
             {
                srcAddr = srcRdma->nic.ipAddr;
-               NicAddress_ipToStr(srcAddr, from);
+               SocketTk_ipaddrToStr(from, sizeof(from), srcAddr);
             }
             else
             {
-               srcAddr.s_addr = 0;
+               srcAddr = in6addr_any;
                strncpy(from, "any", sizeof(from));
             }
 
             Logger_logTopFormatted(log, LogTopic_CONN, Log_DEBUG, logContext,
                "Establishing new RDMA connection from %s to: %s@%s", from, nodeTypeStr, endpointStr);
-            sock = (Socket*)RDMASocket_construct(srcAddr, srcRdma);
+            sock = (Socket*)RDMASocket_construct(app->sockDomain, srcAddr, srcRdma);
          } break;
          case NICADDRTYPE_STANDARD:
          { // TCP
             Logger_logTopFormatted(log, LogTopic_CONN, Log_DEBUG, logContext,
                "Establishing new TCP connection to: %s@%s", nodeTypeStr, endpointStr);
-            sock = (Socket*)StandardSocket_constructTCP();
+            sock = (Socket*)StandardSocket_construct(app->sockDomain, SOCK_STREAM, 0);
          } break;
 
          default:
@@ -506,7 +510,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
             if(this->logConnErrors)
                Logger_logTopFormatted(log, LogTopic_CONN, Log_WARNING, logContext,
                   "Skipping unknown connection type to: %s@%s", nodeTypeStr, endpointStr);
-            goto continue_clean_endpointStr;
+            goto next_iteration;
          }
       } // end of switch
 
@@ -517,7 +521,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
             Logger_logFormatted(log, Log_WARNING, logContext, "Socket initialization failed: %s@%s",
                nodeTypeStr, endpointStr);
 
-         goto continue_clean_endpointStr;
+         goto next_iteration;
       }
 
       // the actual connection attempt
@@ -527,8 +531,8 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
 
       if(connectRes)
       { // connected
-         struct in_addr peerIP = Socket_getPeerIP(sock);
-         NicAddrType_t sockType = Socket_getSockType(sock);
+         struct in6_addr peerIP = sock->peerIP;
+         NicAddrType_t sockType = sock->sockType;
 
          if(__NodeConnPool_shouldPrintConnectedLogMsg(this, peerIP, sockType) )
          {
@@ -553,16 +557,14 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
             psock->closeOnRelease = signal_pending(current);
          }
 
-         kfree(endpointStr);
-
          break;
       }
       else
       { // not connected
          if(this->logConnErrors)
          {
-            struct in_addr peerIP = Socket_getPeerIP(sock);
-            NicAddrType_t sockType = Socket_getSockType(sock);
+            struct in6_addr peerIP = sock->peerIP;
+            NicAddrType_t sockType = sock->sockType;
 
             if(__NodeConnPool_shouldPrintConnectFailedLogMsg(this, peerIP, sockType) )
             {
@@ -581,8 +583,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
       }
 
 
-   continue_clean_endpointStr:
-      kfree(endpointStr);
+   next_iteration:
 
       if (fatal_signal_pending(current))
          break;
@@ -600,7 +601,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
    { // success => add to list (as unavailable) and update stats
       PooledSocket* pooledSock = (PooledSocket*)sock;
 
-      if (srcRdma && Socket_getSockType(sock) != NICADDRTYPE_RDMA)
+      if (srcRdma && sock->sockType != NICADDRTYPE_RDMA)
       {
          srcRdma->established--;
          if (!rdmaConnectInterrupted)
@@ -610,7 +611,7 @@ Socket* NodeConnPool_acquireStreamSocketEx(NodeConnPool* this, bool allowWaiting
       ConnectionList_append(&this->connList, pooledSock);
       __NodeConnPool_statsAddNic(this, PooledSocket_getNicType(pooledSock) );
 
-      __NodeConnPool_setConnSuccess(this, Socket_getPeerIP(sock), Socket_getSockType(sock) );
+      __NodeConnPool_setConnSuccess(this, sock->peerIP, sock->sockType );
    }
    else
    { // absolutely unable to connect
@@ -677,7 +678,7 @@ void NodeConnPool_releaseStreamSocket(NodeConnPool* this, Socket* sock)
    PooledSocket_setAvailable(pooledSock, true);
    ConnectionList_moveToHead(&this->connList, pooledSock);
 
-   if (Socket_getSockType((Socket*) pooledSock) == NICADDRTYPE_RDMA)
+   if (pooledSock->socket.sockType == NICADDRTYPE_RDMA)
    {
       NicAddressStats* st = IBVSocket_getNicStats(&((RDMASocket*) pooledSock)->ibvsock);
       if (st)
@@ -726,13 +727,13 @@ void __NodeConnPool_invalidateSpecificStreamSocket(NodeConnPool* this, Socket* s
    if (unlikely(PooledSocket_getPool(pooledSock) != &this->connList))
    { // socket not in the list
       Logger_logErrFormatted(log, logContext,
-         "Tried to remove a socket that was not found in the pool: %s", Socket_getPeername(sock) );
+         "Tried to remove a socket that was not found in the pool: %s", sock->peername);
       sockValid = false;
    }
    else
    {
       this->establishedConns--;
-      if (Socket_getSockType((Socket*) sock) == NICADDRTYPE_RDMA)
+      if (sock->sockType == NICADDRTYPE_RDMA)
       {
          NicAddressStats* st = IBVSocket_getNicStats(&((RDMASocket*) sock)->ibvsock);
          if (st)
@@ -755,12 +756,12 @@ void __NodeConnPool_invalidateSpecificStreamSocket(NodeConnPool* this, Socket* s
    if(shutdownRes)
    {
       Logger_logTopFormatted(log, LogTopic_CONN, Log_DEBUG, logContext, "Disconnected: %s@%s",
-         Node_getNodeTypeStr(this->parentNode), Socket_getPeername(sock) );
+         Node_getNodeTypeStr(this->parentNode), sock->peername);
    }
    else
    {
       Logger_logTopFormatted(log, LogTopic_CONN, Log_DEBUG, logContext, "Hard disconnect: %s@%s",
-         Node_getNodeTypeStr(this->parentNode), Socket_getPeername(sock) );
+         Node_getNodeTypeStr(this->parentNode), sock->peername);
    }
 
    Socket_virtualDestruct(sock);
@@ -810,7 +811,7 @@ unsigned __NodeConnPool_invalidateAvailableStreams(NodeConnPool* this, bool idle
       // will be removed in stage 2
       PooledSocket_setAvailable(sock, false);
       this->availableConns--;
-      if (Socket_getSockType((Socket*)sock) == NICADDRTYPE_RDMA)
+      if (sock->socket.sockType == NICADDRTYPE_RDMA)
       {
          NicAddressStats* st = IBVSocket_getNicStats(&((RDMASocket*) sock)->ibvsock);
          if (st)
@@ -898,7 +899,7 @@ bool __NodeConnPool_applySocketOptionsPreConnect(NodeConnPool* this, Socket* soc
 {
    Config* cfg = App_getConfig(this->app);
 
-   NicAddrType_t sockType = Socket_getSockType(sock);
+   NicAddrType_t sockType = sock->sockType;
 
    if(sockType == NICADDRTYPE_STANDARD)
    {
@@ -942,7 +943,7 @@ bool __NodeConnPool_applySocketOptionsConnected(NodeConnPool* this, Socket* sock
 
    bool allSuccessful = true;
 
-   NicAddrType_t sockType = Socket_getSockType(sock);
+   NicAddrType_t sockType = sock->sockType;
 
    // apply general socket options
    if(sockType == NICADDRTYPE_STANDARD)
@@ -1082,9 +1083,9 @@ unsigned NodeConnPool_getFirstPeerName(NodeConnPool* this, NicAddrType_t nicType
       Socket* sock = (Socket*)pooledSock;
 
       if(PooledSocket_isAvailable(pooledSock) &&
-         (Socket_getSockType(sock) == nicType) )
+         (sock->sockType == nicType) )
       { // found a match => print to buf and stop
-         numWritten += scnprintf(outBuf, outBufLen, "%s", Socket_getPeername(sock) );
+         numWritten += scnprintf(outBuf, outBufLen, "%s", sock->peername);
 
          *outIsNonPrimary = PooledSocket_getHasExpirationTimer(pooledSock);
 
@@ -1201,11 +1202,11 @@ bool NodeConnPool_updateInterfaces(NodeConnPool* this, unsigned short streamPort
 
 void __NodeConnPool_setCompleteFail(NodeConnPool* this)
 {
-   this->errState.lastSuccessPeerIP.s_addr = 0;
+   this->errState.lastSuccessPeerIP = in6addr_any;
    this->errState.wasLastTimeCompleteFail = true;
 }
 
-void __NodeConnPool_setConnSuccess(NodeConnPool* this, struct in_addr lastSuccessPeerIP,
+void __NodeConnPool_setConnSuccess(NodeConnPool* this, struct in6_addr lastSuccessPeerIP,
    NicAddrType_t lastSuccessNicType)
 {
    this->errState.lastSuccessPeerIP = lastSuccessPeerIP;
@@ -1214,20 +1215,20 @@ void __NodeConnPool_setConnSuccess(NodeConnPool* this, struct in_addr lastSucces
    this->errState.wasLastTimeCompleteFail = false;
 }
 
-bool __NodeConnPool_equalsLastSuccess(NodeConnPool* this, struct in_addr lastSuccessPeerIP,
+bool __NodeConnPool_equalsLastSuccess(NodeConnPool* this, struct in6_addr lastSuccessPeerIP,
    NicAddrType_t lastSuccessNicType)
 {
-   return (this->errState.lastSuccessPeerIP.s_addr == lastSuccessPeerIP.s_addr) &&
+   return ipv6_addr_equal(&this->errState.lastSuccessPeerIP, &lastSuccessPeerIP) &&
       (this->errState.lastSuccessNicType == lastSuccessNicType);
 
 }
 
 bool __NodeConnPool_isLastSuccessInitialized(NodeConnPool* this)
 {
-   return (this->errState.lastSuccessPeerIP.s_addr != 0);
+   return ! ipv6_addr_any(&this->errState.lastSuccessPeerIP);
 }
 
-bool __NodeConnPool_shouldPrintConnectedLogMsg(NodeConnPool* this, struct in_addr currentPeerIP,
+bool __NodeConnPool_shouldPrintConnectedLogMsg(NodeConnPool* this, struct in6_addr currentPeerIP,
    NicAddrType_t currentNicType)
 {
    /* log only if we didn's succeed at all last time, or if we succeeded last time and it was
@@ -1238,7 +1239,7 @@ bool __NodeConnPool_shouldPrintConnectedLogMsg(NodeConnPool* this, struct in_add
       !__NodeConnPool_equalsLastSuccess(this, currentPeerIP, currentNicType);
 }
 
-bool __NodeConnPool_shouldPrintConnectFailedLogMsg(NodeConnPool* this, struct in_addr currentPeerIP,
+bool __NodeConnPool_shouldPrintConnectFailedLogMsg(NodeConnPool* this, struct in6_addr currentPeerIP,
    NicAddrType_t currentNicType)
 {
    /* log only if this is the first connection attempt or if we succeeded last time this this

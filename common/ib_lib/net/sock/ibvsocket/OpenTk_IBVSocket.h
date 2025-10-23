@@ -1,5 +1,6 @@
 #pragma once
 
+#include <common/net/sock/IPAddress.h>
 #include <arpa/inet.h>
 
 
@@ -31,15 +32,18 @@ extern bool IBVSocket_rdmaDevicesExist(void);
 extern void IBVSocket_fork_init_once(void);
 
 // methods
-extern bool IBVSocket_connectByName(IBVSocket* _this, const char* hostname, unsigned short port,
+extern bool IBVSocket_connectByName(IBVSocket* _this, const char* hostname, uint16_t port,
+   sa_family_t ai_family, IBVCommConfig* commCfg);
+// port is in host order
+extern bool IBVSocket_connectByIP(IBVSocket* _this, const SocketAddress& ipaddress,
    IBVCommConfig* commCfg);
-extern bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress, unsigned short port,
-   IBVCommConfig* commCfg);
-extern bool IBVSocket_bind(IBVSocket* _this, unsigned short port);
-extern bool IBVSocket_bindToAddr(IBVSocket* _this, in_addr_t ipAddr, unsigned short port);
+// port is in host order
+extern bool IBVSocket_bind(IBVSocket* _this, uint16_t port);
+// port is in host order
+extern bool IBVSocket_bindToAddr(IBVSocket* _this, const SocketAddress& ipAddr);
 extern bool IBVSocket_listen(IBVSocket* _this);
 extern IBVSocket_AcceptRes IBVSocket_accept(IBVSocket* _this, IBVSocket** outAcceptedSock,
-   struct sockaddr* peerAddr, socklen_t* peerAddrLen);
+   struct sockaddr_storage* peerAddr, socklen_t* peerAddrLen);
 extern bool IBVSocket_shutdown(IBVSocket* _this);
 
 #ifdef BEEGFS_NVFS

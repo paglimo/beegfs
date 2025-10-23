@@ -1,9 +1,9 @@
 #pragma once
 
+#include <common/net/sock/IPAddress.h>
 #include <common/nodes/Node.h>
 #include <common/threading/Mutex.h>
 
-#include <unordered_map>
 
 
 /**
@@ -13,9 +13,11 @@ class ClientOps
 {
    public:
       using OpsList = std::list<int64_t>;
-      using IdOpsMap = std::map<int64_t, OpsList>;
+      // key is either UID or IPv6 binary
+      using IdOpsMap = std::map<uint128_t, OpsList>;
 
-      bool addOpsList(uint64_t id, const OpsList& opsList);
+      // key is either UID or IPv6 binary
+      bool addOpsList(uint128_t id, const OpsList& opsList);
 
       IdOpsMap getDiffOpsMap() const;
       OpsList getDiffSumOpsList() const;
@@ -60,8 +62,8 @@ class ClientOps
 class ClientOpsRequestor
 {
    public:
-      typedef std::unordered_map<uint64_t, ClientOps::OpsList> IdOpsUnorderedMap;
+      typedef std::unordered_map<uint128_t, ClientOps::OpsList, uint128::Hash> IdOpsUnorderedMap;
 
-      static IdOpsUnorderedMap request(Node& node, bool perUser);
+      static IdOpsUnorderedMap request(Node& node, bool perUser, bool useClientStatsV2);
 };
 

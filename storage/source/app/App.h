@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/net/sock/IPAddress.h"
 #include <app/config/Config.h>
 #include <common/app/log/LogContext.h>
 #include <common/app/log/Logger.h>
@@ -16,7 +17,6 @@
 #include <common/storage/Storagedata.h>
 #include <common/toolkit/AcknowledgmentStore.h>
 #include <common/storage/quota/ExceededQuotaStore.h>
-#include <common/toolkit/NetFilter.h>
 #include <common/Common.h>
 #include <components/benchmarker/StorageBenchOperator.h>
 #include <components/buddyresyncer/BuddyResyncer.h>
@@ -32,7 +32,7 @@
 #include <storage/SyncedStoragePaths.h>
 #include <storage/StorageTargets.h>
 #include <toolkit/QuotaTk.h>
-
+#include <components/chunkbalancer/ChunkBalancerJob.h>
 
 #ifndef BEEGFS_VERSION
    #error BEEGFS_VERSION undefined
@@ -52,6 +52,7 @@ typedef std::vector<StreamListenerV2*> StreamLisVec;
 typedef StreamLisVec::iterator StreamLisVecIter;
 
 
+
 // forward declarations
 class LogContext;
 
@@ -68,6 +69,7 @@ class App : public AbstractApp
       virtual void handleNetworkInterfaceFailure(const std::string& devname) override;
 
       void handleNetworkInterfacesChanged(NicAddressList nicList);
+      Mutex ChunkBalanceJobMutex;
 
    private:
       int appResult;
@@ -81,8 +83,8 @@ class App : public AbstractApp
       LockFD pidFileLockFD;
       std::vector<LockFD> storageTargetLocks;
 
-      NetFilter* netFilter; // empty filter means "all nets allowed"
-      NetFilter* tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
+      NetFilter netFilter; // empty filter means "all nets allowed"
+      NetFilter tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
       std::shared_ptr<Node> localNode;
 
       NodeStoreServers* mgmtNodes;
@@ -91,6 +93,8 @@ class App : public AbstractApp
 
       TargetMapper* targetMapper;
       MirrorBuddyGroupMapper* mirrorBuddyGroupMapper; // maps targets to mirrorBuddyGroups
+      MirrorBuddyGroupMapper* metaMirrorBuddyGroupMapper; // maps targets to mirrorBuddyGroups
+
       TargetStateStore* targetStateStore; // map storage targets to a state
 
       MultiWorkQueueMap workQueueMap; // maps targetIDs to WorkQueues
@@ -126,6 +130,9 @@ class App : public AbstractApp
 
       BuddyResyncer* buddyResyncer;
       ChunkLockStore* chunkLockStore;
+
+ 
+      ChunkBalancerJob* chunkBalancerJob;
 
       std::unique_ptr<StoragePoolStore> storagePoolStore;
 
@@ -208,12 +215,12 @@ class App : public AbstractApp
 
       virtual const NetFilter* getNetFilter() const override
       {
-         return netFilter;
+         return &netFilter;
       }
 
       virtual const NetFilter* getTcpOnlyFilter() const override
       {
-         return tcpOnlyFilter;
+         return &tcpOnlyFilter;
       }
 
       virtual const AbstractNetMessageFactory* getNetMessageFactory() const override
@@ -261,6 +268,11 @@ class App : public AbstractApp
       MirrorBuddyGroupMapper* getMirrorBuddyGroupMapper() const
       {
          return mirrorBuddyGroupMapper;
+      }
+
+      MirrorBuddyGroupMapper* getMetaMirrorBuddyGroupMapper() const
+      {
+         return metaMirrorBuddyGroupMapper;
       }
 
       TargetStateStore* getTargetStateStore() const
@@ -379,6 +391,25 @@ class App : public AbstractApp
          return &workerList;
       }
 
+   
+      ChunkBalancerJob* getChunkBalancerJob() 
+      {
+         return chunkBalancerJob;
+      }
+
+      void setChunkBalancerJob(ChunkBalancerJob* chunkBalancerJob) 
+      {
+         this->chunkBalancerJob=chunkBalancerJob;
+      }
+
+      //should be called ONLY by the ChunkBalancerJob itself using selfShutdown()
+      void cleanupChunkBalancerJob()
+      {
+         chunkBalancerJob->join();
+         SAFE_DELETE(chunkBalancerJob); 
+         chunkBalancerJob = NULL;
+      }
+      
       StoragePoolStore* getStoragePoolStore() const
       {
          return storagePoolStore.get();

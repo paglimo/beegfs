@@ -5,6 +5,7 @@
 #include <common/toolkit/HighResolutionStats.h>
 #include <common/toolkit/Time.h>
 #include <common/toolkit/StringTk.h>
+#include "IPAddress.h"
 #include "Channel.h"
 #include "NetworkInterfaceCard.h"
 #include "SocketException.h"
@@ -20,36 +21,41 @@ class Socket : public Channel
 {
    public:
 
-      static std::string ipaddrToStr(in_addr_t addr);
-      static std::string ipaddrToStr(struct in_addr ipaddress);
-      static std::string endpointAddrToStr(struct in_addr ipaddress, unsigned short port);
-      static std::string endpointAddrToStr(in_addr_t ipaddress, unsigned short port);
-      static std::string endpointAddrToStr(const char* hostname, unsigned short port);
-      static std::string endpointAddrToStr(const struct sockaddr_in* sin);
+      static std::string ipaddrToStr(const struct sockaddr* sa);
+      // port is host order
+      static std::string endpointAddrToStr(const IPAddress& ipaddress, uint16_t port);
+      // port is host order
+      static std::string endpointAddrToStr(const char* hostname, uint16_t port);
+      static std::string endpointAddrToStr(const struct sockaddr* sa);
+      static std::string endpointAddrToStr(const struct sockaddr_storage* sas)
+      {
+         return endpointAddrToStr(reinterpret_cast<const struct sockaddr*>(sas));
+      }
 
       virtual ~Socket();
-      virtual void connect(const char* hostname, unsigned short port) = 0;
-      virtual void connect(const struct sockaddr* serv_addr, socklen_t addrlen) = 0;
-      virtual void bindToAddr(in_addr_t ipAddr, unsigned short port) = 0;
+      // port is in host order
+      virtual void connect(const char* hostname, uint16_t port) = 0;
+      virtual void connect(const SocketAddress& serv_addr) = 0;
+      // port is in host order
+      virtual void bindToAddr(const SocketAddress& ipAddr) = 0;
       virtual void listen() = 0;
-      virtual Socket* accept(struct sockaddr* addr, socklen_t* addrlen) = 0;
+      virtual Socket* accept(struct sockaddr_storage* addr, socklen_t* addrLen) = 0;
       virtual void shutdown() = 0;
       virtual void shutdownAndRecvDisconnect(int timeoutMS) = 0;
 
 #ifdef BEEGFS_NVFS
-      virtual ssize_t read(const void *buf, size_t len, unsigned lkey, const uint64_t rbuf, unsigned rkey) = 0;
-      virtual ssize_t write(const void *buf, size_t len, unsigned lkey, const uint64_t rbuf, unsigned rkey) = 0;
+      virtual ssize_t read(const void *buf, size_t len, uint32_t lkey, const uint64_t rbuf, uint32_t rkey) = 0;
+      virtual ssize_t write(const void *buf, size_t len, uint32_t lkey, const uint64_t rbuf, uint32_t rkey) = 0;
 #endif /* BEEGFS_NVFS */
 
       virtual ssize_t send(const void *buf, size_t len, int flags) = 0;
-      virtual ssize_t sendto(const void *buf, size_t len, int flags,
-         const struct sockaddr *to, socklen_t tolen) = 0;
+      virtual ssize_t sendto(const void *buf, size_t len, int flags, const SocketAddress* to) = 0;
 
       virtual ssize_t recv(void *buf, size_t len, int flags) = 0;
       virtual ssize_t recvT(void *buf, size_t len, int flags, int timeoutMS) = 0;
 
-      void connect(const struct in_addr* ipaddress, unsigned short port);
-      void bind(unsigned short port);
+      void connect(const IPAddress& ipaddress, uint16_t port);
+      void bind(uint16_t port);
 
 
    protected:
@@ -57,12 +63,12 @@ class Socket : public Channel
 
       HighResolutionStats* stats;
       NicAddrType sockType;
-      struct in_addr peerIP;
-      struct in_addr bindIP;
-      unsigned short bindPort; // set by bindToAddr
+      IPAddress peerIP;
+      IPAddress bindIP;
+      uint16_t bindPort; // set by bindToAddr
       std::string peername;
 
-      void connect(const char* hostname, unsigned short port, int ai_family, int ai_socktype);
+      void connect(const char* hostname, uint16_t port, int ai_socktype);
 
 
    private:
@@ -71,12 +77,13 @@ class Socket : public Channel
 
    public:
       // getters & setters
-      inline uint32_t getPeerIP()
+
+      inline const IPAddress& getPeerIP() const
       {
-         return peerIP.s_addr;
+         return peerIP;
       }
 
-      inline struct in_addr getBindIP()
+      inline const IPAddress& getBindIP() const
       {
          return bindIP;
       }
@@ -101,7 +108,7 @@ class Socket : public Channel
          this->stats = &dummyStats;
       }
 
-      inline unsigned short getBindPort()
+      inline uint16_t getBindPort()
       {
          return bindPort;
       }
@@ -178,6 +185,7 @@ class Socket : public Channel
          return (ssize_t)receivedLen;
       }
 
+      static bool checkAndCacheIPv6Availability(uint16_t probePort, bool disableIPv6);
+      static bool isIPv6Available();
 };
-
 

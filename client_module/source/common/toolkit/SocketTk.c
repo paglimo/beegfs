@@ -82,9 +82,9 @@ int SocketTk_poll(PollState* state, int timeoutMS)
       // for each sock: ask for available data and register waitqueue
       list_for_each_entry(socket, &state->list, poll._list)
       {
-         if(Socket_getSockType(socket) == NICADDRTYPE_RDMA)
+         if(socket->sockType == NICADDRTYPE_RDMA)
          { // RDMA socket
-            struct RDMASocket* currentRDMASock = (RDMASocket*)socket;
+            RDMASocket* currentRDMASock = (RDMASocket*)socket;
             bool finishPoll = (numSocksWithREvents || !__timeout);
 
             unsigned long mask = RDMASocket_poll(
@@ -98,8 +98,8 @@ int SocketTk_poll(PollState* state, int timeoutMS)
          }
          else
          { // Standard socket
-            struct socket* currentRawSock =
-               StandardSocket_getRawSock( (StandardSocket*)socket);
+            StandardSocket *standardSocket = (StandardSocket *) socket;
+            struct socket* currentRawSock = standardSocket->sock;
             poll_table* currentStdWait = numSocksWithREvents ? NULL : stdWait;
 
             unsigned long mask = (*currentRawSock->ops->poll)(
@@ -138,7 +138,7 @@ int SocketTk_poll(PollState* state, int timeoutMS)
    // cleanup loop for RDMA socks
    list_for_each_entry(socket, &state->list, poll._list)
    {
-      if(Socket_getSockType(socket) == NICADDRTYPE_RDMA)
+      if(socket->sockType == NICADDRTYPE_RDMA)
       {
          struct RDMASocket* currentRDMASock = (RDMASocket*)socket;
          RDMASocket_poll(currentRDMASock, socket->poll._events, true);
@@ -162,15 +162,25 @@ int SocketTk_poll(PollState* state, int timeoutMS)
  * @return false for wrong input on modern kernels (>= 2.6.20), old kernels always return
  * true
  */
-bool SocketTk_getHostByAddrStr(const char* hostAddr, struct in_addr* outIPAddr)
+bool SocketTk_getHostByAddrStr(const char* hostAddr, struct in6_addr *ipAddr)
 {
-   if(unlikely(!in4_pton(hostAddr, strlen(hostAddr), (u8 *)outIPAddr, -1, NULL) ) )
-   { // not a valid address string
-      outIPAddr->s_addr = INADDR_NONE;
-      return false;
+   struct in_addr in_addr;
+   struct in6_addr in6_addr;
+   const char *end = NULL;
+   if (in4_pton(hostAddr, -1, (void *)&in_addr.s_addr, 0, &end))
+   {
+      // could check if all was consumed using (*end == '\0')
+      *ipAddr = beegfs_mapped_ipv4(in_addr);
+      return true;
    }
-
-   return true;
+   else if (in6_pton(hostAddr, -1, (void *)&in6_addr.s6_addr, 0, &end))
+   {
+      // could check if all was consumed using (*end == '\0')
+      *ipAddr = in6_addr;
+      return true;
+   }
+   *ipAddr = beegfs_mapped_ipv4((struct in_addr) { htonl(INADDR_NONE)});
+   return false;
 }
 
 /**
@@ -178,58 +188,35 @@ bool SocketTk_getHostByAddrStr(const char* hostAddr, struct in_addr* outIPAddr)
  *
  * @return INADDR_NONE if an error was detected (recent kernels only)
  */
-struct in_addr SocketTk_in_aton(const char* hostAddr)
+struct in6_addr SocketTk_in_aton(const char* hostAddr)
 {
-   struct in_addr retVal;
-
-   // Note: retVal INADDR_NONE will be set by getHostByAddrStr()
-
+   struct in6_addr retVal;
    SocketTk_getHostByAddrStr(hostAddr, &retVal);
-
    return retVal;
 }
 
-/**
- * @param buf the buffer to which <IP> should be written.
- */
-void SocketTk_ipaddrToStrNoAlloc(struct in_addr ipaddress, char* ipStr, size_t ipStrLen)
+
+int SocketTk_ipaddrToStr(char *buf, size_t size, struct in6_addr ipaddress)
 {
-   int printRes = snprintf(ipStr, ipStrLen, "%pI4", &ipaddress);
-   if(unlikely( (size_t)printRes >= ipStrLen) )
-      ipStr[ipStrLen-1] = 0; // ipStrLen exceeded => zero-terminate result
+   if (ipv6_addr_v4mapped(&ipaddress))
+   {
+      return scnprintf(buf, size, "%pI4c", &ipaddress.s6_addr[12]); // IPv4 (4 bytes, at offset 12)
+   }
+   else  // IPv6
+   {
+      return scnprintf(buf, size, "%pI6c", &ipaddress.s6_addr[0]); // IPv6 (all 16 bytes)
+   }
 }
 
-/**
- * @return string is kalloced and needs to be kfreed
- */
-char* SocketTk_ipaddrToStr(struct in_addr ipaddress)
+int SocketTk_endpointToStr(char *buf, size_t size, struct in6_addr ipaddress, unsigned short port)
 {
-   char* ipStr = os_kmalloc(SOCKETTK_IPADDRSTR_LEN);
-   if (likely(ipStr != NULL))
-      SocketTk_ipaddrToStrNoAlloc(ipaddress, ipStr, SOCKETTK_IPADDRSTR_LEN);
-   return ipStr;
+   if (ipv6_addr_v4mapped(&ipaddress))
+   {
+      return scnprintf(buf, size, "%pI4c:%u", &ipaddress.s6_addr[12], (unsigned) port);
+   }
+   else  // IPv6
+   {
+      struct sockaddr_in6 sa = beegfs_make_sockaddr_in6(ipaddress, port);
+      return scnprintf(buf, size, "%pISpc", &sa);
+   }
 }
-
-/**
- * @param buf the buffer to which <IP>:<port> should be written.
- */
-void SocketTk_endpointAddrToStrNoAlloc(char* buf, size_t bufLen, struct in_addr ipaddress,
-   unsigned short port)
-{
-   int printRes = snprintf(buf, bufLen, "%pI4:%u", &ipaddress, port);
-   if(unlikely( (unsigned)printRes >= bufLen) )
-      buf[bufLen-1] = 0; // bufLen exceeded => zero-terminate result
-}
-
-/**
- * @return string is kalloced and needs to be kfreed
- */
-char* SocketTk_endpointAddrToStr(struct in_addr ipaddress, unsigned short port)
-{
-   char* endpointStr = os_kmalloc(SOCKETTK_ENDPOINTSTR_LEN);
-   if (likely(endpointStr != NULL))
-      SocketTk_endpointAddrToStrNoAlloc(endpointStr, SOCKETTK_ENDPOINTSTR_LEN, ipaddress, port);
-   return endpointStr;
-}
-
-

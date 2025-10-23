@@ -57,7 +57,7 @@ static inline bool NetMessage_checkHeaderFeatureFlagsCompat(NetMessage* this);
 
 // virtual functions
 extern bool NetMessage_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 extern unsigned NetMessage_getSupportedHeaderFeatureFlagsMask(NetMessage* this);
 
 // getters & setters
@@ -97,7 +97,7 @@ struct NetMessageOps
    void (*serializePayload) (NetMessage* this, SerializeCtx* ctx);
    bool (*deserializePayload) (NetMessage* this, DeserializeCtx* ctx);
 
-   bool (*processIncoming) (NetMessage* this, struct App* app, fhgfs_sockaddr_in* fromAddr,
+   bool (*processIncoming) (NetMessage* this, struct App* app, struct sockaddr_in6* fromAddr,
       struct Socket* sock, char* respBuf, size_t bufLen);
    unsigned (*getSupportedHeaderFeatureFlagsMask) (NetMessage* this);
 

@@ -14,7 +14,7 @@ class PooledSocket : public Socket
 
 
    protected:
-      PooledSocket() : expireTimeStart(true)
+      PooledSocket() : Socket(), expireTimeStart(true)
       {
          this->available = false;
          this->closeOnRelease = false;

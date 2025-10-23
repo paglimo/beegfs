@@ -133,6 +133,8 @@ void InternodeSyncer::syncLoop()
          downloadAndSyncNodes();
          downloadAndSyncTargetMappings();
          downloadAndSyncMirrorBuddyGroups();
+         downloadAndSyncMetaMirrorBuddyGroups();
+
 
          lastDownloadNodesT.setToNow();
       }
@@ -931,6 +933,42 @@ bool InternodeSyncer::downloadAndSyncMirrorBuddyGroups()
 
    return retVal;
 }
+
+/**
+ * @return false on error
+ */
+bool InternodeSyncer::downloadAndSyncMetaMirrorBuddyGroups()
+{
+   LogContext("Downlod meta mirror groups").log(LogTopic_STATES, Log_DEBUG,
+         "Syncing mirror groups.");
+   App* app = Program::getApp();
+   NodeStoreServers* mgmtNodes = app->getMgmtNodes();
+   MirrorBuddyGroupMapper* buddyGroupMapper = app->getMetaMirrorBuddyGroupMapper();
+
+   bool retVal = true;
+
+   auto mgmtNode = mgmtNodes->referenceFirstNode();
+   if(!mgmtNode)
+      return false;
+
+   UInt16List buddyGroupIDs;
+   UInt16List primaryTargetIDs;
+   UInt16List secondaryTargetIDs;
+
+   bool downloadRes = NodesTk::downloadMirrorBuddyGroups(*mgmtNode, NODETYPE_Meta,
+         &buddyGroupIDs, &primaryTargetIDs, &secondaryTargetIDs, true);
+
+   if(downloadRes)
+   {
+      buddyGroupMapper->syncGroupsFromLists(buddyGroupIDs, primaryTargetIDs, secondaryTargetIDs,
+         app->getLocalNode().getNumID());
+   }
+   else
+      retVal = false;
+
+   return retVal;
+}
+
 
 bool InternodeSyncer::downloadAndSyncStoragePools()
 {

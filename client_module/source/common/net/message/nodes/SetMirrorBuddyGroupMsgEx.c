@@ -43,7 +43,7 @@ bool SetMirrorBuddyGroupMsgEx_deserializePayload(NetMessage* this, DeserializeCt
 }
 
 bool __SetMirrorBuddyGroupMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    MirrorBuddyGroupMapper* mirrorBuddyGroupMapper;
@@ -52,8 +52,6 @@ bool __SetMirrorBuddyGroupMsgEx_processIncoming(NetMessage* this, struct App* ap
    FhgfsOpsErr addGroupResult;
 
    SetMirrorBuddyGroupMsgEx* thisCast = (SetMirrorBuddyGroupMsgEx*)this;
-
-   const char* peer;
 
    uint16_t primaryTargetID = SetMirrorBuddyGroupMsgEx_getPrimaryTargetID(thisCast);
    uint16_t secondaryTargetID = SetMirrorBuddyGroupMsgEx_getSecondaryTargetID(thisCast);
@@ -91,9 +89,6 @@ bool __SetMirrorBuddyGroupMsgEx_processIncoming(NetMessage* this, struct App* ap
             "Error: %s",
             Node_nodeTypeToStr(nodeType), buddyGroupID, primaryTargetID, secondaryTargetID,
             FhgfsOpsErr_toErrString(addGroupResult) );
-
-   peer = fromAddr ?
-      SocketTk_ipaddrToStr(fromAddr->addr) : StringTk_strDup(Socket_getPeername(sock) );
 
    // send Ack
    MsgHelperAck_respondToAckRequest(app, SetMirrorBuddyGroupMsgEx_getAckID(thisCast), fromAddr,

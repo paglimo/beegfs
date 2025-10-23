@@ -35,6 +35,7 @@ struct TargetStateStore;
 struct NoAllocBufferStore;
 struct AcknowledgmentStore;
 struct NetFilter;
+struct NicAddressFilter;
 struct InodeRefStore;
 struct StatFsCache;
 
@@ -144,8 +145,8 @@ struct App
 
    struct NetFilter* netFilter; // empty filter means "all nets allowed"
    struct NetFilter* tcpOnlyFilter; // for IPs which allow only plain TCP (no RDMA etc)
-   StrCpyList allowedInterfaces; // empty list means "all interfaces accepted"
-   StrCpyList allowedRDMAInterfaces; // empty list means "all interfaces eligible"
+   struct NicAddressFilter* nicAddressFilter;  // empty filter means "all interfaces allowed"
+   struct NicAddressFilter* rdmaNicAddressFilter;  // empty filter means "all interfaces allowed"
    UInt16List preferredMetaNodes; // empty list means "no preferred nodes => use any"
    UInt16List preferredStorageTargets; // empty list means "no preferred nodes => use any"
    // rdmaNicList contains the addresses of specific RDMA NICs to use for outbound RDMA.
@@ -188,6 +189,9 @@ struct App
    struct inode_operations* symlinkInodeOps;
    struct inode_operations* dirInodeOps;
    struct inode_operations* specialInodeOps;
+
+   // AF_INET or AF_INET6
+   int sockDomain;
 
 #ifdef BEEGFS_DEBUG
    Mutex debugCounterMutex; // this is the closed tree, so we don't have atomics here (but doesn't

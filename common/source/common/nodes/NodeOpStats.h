@@ -3,6 +3,7 @@
 #include <common/nodes/OpCounter.h>
 #include <common/threading/SafeRWLock.h>
 #include <common/nodes/Node.h>
+#include <vector>
 
 // layout version ofthe vector transfered to fhgfs-ctl
 #define OPCOUNTER_VEC_LAYOUT_VERS 1 // only update, if the layout changes incompatibly!
@@ -48,7 +49,7 @@ enum StatsMetaVecPos
    (NODE_OPS_POS_FIRSTDATAELEMENT + OPCOUNTERVECTOR_POS_FIRSTCOUNTER)
 
 
-typedef std::map<unsigned, OpCounter> NodeOpCounterMap; // key: nodeIP/userID, val: op counters
+typedef std::map<uint128_t, OpCounter> NodeOpCounterMap; // key: nodeIP/userID, val: op counters
 typedef NodeOpCounterMap::value_type NodeOpCounterMapVal;
 typedef NodeOpCounterMap::iterator NodeOpCounterMapIter;
 
@@ -61,12 +62,12 @@ typedef NodeOpCounterMap::iterator NodeOpCounterMapIter;
 class NodeOpStats
 {
    public:
-      bool mapToUInt64Vec(uint64_t cookieIP, size_t bufLen, bool wantPerUserStats,
-         UInt64Vector *outVec);
+      bool mapToUInt128Vec(uint128_t cookieIP, size_t bufLen, bool wantPerUserStats,
+         Uint128Vector *outVec);
 
    private:
       int getMaxIPsPerVector(OpCounter *opCounter, size_t bufLen);
-      bool reserveVector(OpCounter *opCounter, size_t numIPs, UInt64Vector *outVec);
+      bool reserveVector(OpCounter *opCounter, size_t numIPs, Uint128Vector *outVec);
 
    protected:
       NodeOpCounterMap clientCounterMap; // maps IPs to corresponding operation counters
@@ -81,7 +82,7 @@ class NodeOpStats
        *
        * @param IP of a node
        */
-      void removeClientFromMap(unsigned nodeIP)
+      void removeClientFromMap(uint128_t nodeIP)
       {
          SafeRWLock safeLock(&lock, SafeRWLock_WRITE);
          clientCounterMap.erase(nodeIP); // erase by key

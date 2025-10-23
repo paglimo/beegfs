@@ -1,3 +1,4 @@
+#include "common/net/sock/IPAddress.h"
 #include <net/sock/ibvsocket/IBVSocket.h>
 #include <common/net/sock/RDMASocket.h>
 
@@ -7,11 +8,11 @@ class RDMASocketImpl : public RDMASocket
       RDMASocketImpl();
       virtual ~RDMASocketImpl() override;
 
-      virtual void connect(const char* hostname, unsigned short port) override;
-      virtual void connect(const struct sockaddr* serv_addr, socklen_t addrlen) override;
-      virtual void bindToAddr(in_addr_t ipAddr, unsigned short port) override;
+      virtual void connect(const char* hostname, uint16_t port) override;
+      virtual void connect(const SocketAddress& serv_addr) override;
+      virtual void bindToAddr(const SocketAddress& ipAddr) override;
       virtual void listen() override;
-      virtual Socket* accept(struct sockaddr* addr, socklen_t* addrlen) override;
+      virtual Socket* accept(struct sockaddr_storage* addr, socklen_t* addrlen) override;
       virtual void shutdown() override;
       virtual void shutdownAndRecvDisconnect(int timeoutMS) override;
 
@@ -21,8 +22,7 @@ class RDMASocketImpl : public RDMASocket
 #endif /* BEEGFS_NVFS */
 
       virtual ssize_t send(const void *buf, size_t len, int flags) override;
-      virtual ssize_t sendto(const void *buf, size_t len, int flags,
-         const struct sockaddr *to, socklen_t tolen) override;
+      virtual ssize_t sendto(const void *buf, size_t len, int flags, const SocketAddress* to) override;
 
       virtual ssize_t recv(void *buf, size_t len, int flags) override;
       virtual ssize_t recvT(void *buf, size_t len, int flags, int timeoutMS) override;
@@ -32,7 +32,7 @@ class RDMASocketImpl : public RDMASocket
       virtual bool checkDelayedEvents() override;
 
    private:
-      RDMASocketImpl(IBVSocket* ibvsock, struct in_addr peerIP, std::string peername);
+      RDMASocketImpl(IBVSocket* ibvsock, const IPAddress& peerIP, std::string peername);
 
       IBVSocket* ibvsock;
       int fd; // for pollable interface (will be cm-fd for listening sockets and recv-channel-fd

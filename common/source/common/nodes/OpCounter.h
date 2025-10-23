@@ -130,11 +130,11 @@ class OpCounter
       /**
        * Add our counters to an existing vector
        */
-      void addCountersToVec(UInt64Vector *vec)
+      void addCountersToVec(Uint128Vector *vec)
       {
-         for(AtomicUInt64VectorIter iter = opCounters.begin(); iter != opCounters.end(); iter++)
+         for(auto iter = opCounters.begin(); iter != opCounters.end(); iter++)
          {
-            vec->push_back(iter->read() );
+            vec->push_back(static_cast<uint128_t>(iter->read()));
          }
       }
 };

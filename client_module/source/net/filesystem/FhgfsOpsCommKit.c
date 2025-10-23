@@ -201,10 +201,7 @@ static bool __commkit_prepare_generic(CommKitContext* context, struct CommKitTar
 
    FhgfsOpsErr resolveErr;
    NodeConnPool* connPool;
-#ifdef BEEGFS_NVFS
-   FileOpState* currentState = container_of(info, struct FileOpState, base);
-   struct iov_iter* data = NULL;
-#endif
+
    DevicePriorityContext devPrioCtx =
    {
       .maxConns = 0,
@@ -217,13 +214,43 @@ static bool __commkit_prepare_generic(CommKitContext* context, struct CommKitTar
       // one conn already (this is important to avoid a deadlock between racing commkit processes)
 
 #ifdef BEEGFS_NVFS
+   struct iov_iter *data = NULL;
+
    // only set data if this is a storage call, NVFS ops are available and the
    // iov is an ITER_IOVEC.
+   // Extended:
+   //   - For read/write ops: payload is present, so extract FileOpVecState->data.
+   //   - For fsync/statstorage ops: no payload expected, so skip and log (no send data).
+   //   - This ensures we only pass a valid iov_iter to NVFS/GPU checks (RdmaInfo_detectNVFSRequest),
+   //     avoiding false positives.
+   //   - The cnt > 0 guard ensures that only non-empty IOVECs are considered valid.
+   //
    if (context->ioInfo && context->ioInfo->nvfs)
    {
-      struct FileOpVecState* vs = container_of(currentState, struct FileOpVecState, base);
-      if (beegfs_iov_iter_is_iovec(&vs->data))
-         data = &vs->data;
+      if (context->ops == &readfileOps || context->ops == &writefileOps)
+      {
+         FileOpState* currentState;
+         struct FileOpVecState* vs;
+
+         currentState = container_of(info, struct FileOpState, base);
+         vs = container_of(currentState, struct FileOpVecState, base);
+
+         if (beegfs_iov_iter_is_iovec(&vs->data))
+         {
+            size_t cnt = iov_iter_count(&vs->data);
+            Logger_logFormatted(context->log, Log_DEBUG, context->ops->logContext,
+               "%s: state=%d targetID=%hu IOVEC count=%zu", __func__,
+               info->state, info->selectedTargetID, cnt);
+
+            // only set data if there’s actually something to transfer
+            if (cnt > 0)
+               data = &vs->data;
+         }
+      } else {
+         // fsync/statstorage ops and no payload
+         Logger_logFormatted(context->log, Log_DEBUG, context->ops->logContext,
+            "%s: state=%d targetID=%hu (no send data)", __func__, info->state, info->selectedTargetID);
+      }
    }
 #endif
    info->socket = NULL;
@@ -375,7 +402,7 @@ static void __commkit_sendheader_generic(CommKitContext* context,
       Node_copyAliasWithTypeStr(info->node, &nodeAndType);
       Logger_logFormatted(context->log, Log_WARNING, context->ops->logContext,
          "Failed to send message to %s: %s", nodeAndType.buf,
-         Socket_getPeername(info->socket) );
+         info->socket->peername);
 
       info->state = CommKitState_SOCKETINVALIDATE;
       return;
@@ -453,7 +480,7 @@ static void __commkit_recvheader_generic(CommKitContext* context, struct CommKit
          if(recvRes <= 0)
          {
             Logger_logFormatted(context->log, Log_DEBUG, context->ops->logContext,
-               "Failed to receive message header from: %s", Socket_getPeername(info->socket) );
+               "Failed to receive message header from: %s", info->socket->peername);
             goto recv_err;
          }
 
@@ -466,7 +493,7 @@ static void __commkit_recvheader_generic(CommKitContext* context, struct CommKit
       { // message too big to be accepted
          Logger_logFormatted(context->log, Log_WARNING, context->ops->logContext,
             "Received a message that is too large from: %s (bufLen: %u, msgLen: %zdd)",
-            Socket_getPeername(info->socket), BEEGFS_COMMKIT_MSGBUF_SIZE, msgLength);
+            info->socket->peername, BEEGFS_COMMKIT_MSGBUF_SIZE, msgLength);
 
          info->state = -CommKitState_SOCKETINVALIDATE;
          info->nodeResult = -FhgfsOpsErr_COMMUNICATION;
@@ -483,7 +510,7 @@ static void __commkit_recvheader_generic(CommKitContext* context, struct CommKit
          if(recvRes <= 0)
          {
             Logger_logFormatted(context->log, Log_DEBUG, context->ops->logContext,
-               "Failed to receive message body from: %s", Socket_getPeername(info->socket) );
+               "Failed to receive message body from: %s", info->socket->peername);
             goto recv_err;
          }
 
@@ -503,7 +530,7 @@ recv_err:
          Node_copyAliasWithTypeStr(info->node, &nodeAndType);
          Logger_logFormatted(context->log, Log_WARNING, context->ops->logContext,
             "Receive failed from: %s @ %s", nodeAndType.buf,
-            Socket_getPeername(info->socket) );
+            info->socket->peername);
       }
 
       info->state = CommKitState_SOCKETINVALIDATE;
@@ -1479,7 +1506,7 @@ static int __commkit_writefile_recvHeader(CommKitContext* context, struct CommKi
       Logger_logFormatted(context->log, Log_WARNING, context->ops->logContext,
          "Received invalid response from %s. Expected type: %d. Disconnecting: %s",
          nodeAndType.buf, expectedType,
-         Socket_getPeername(currentState->base.socket) );
+         currentState->base.socket->peername);
 
       return -FhgfsOpsErr_COMMUNICATION;
    }

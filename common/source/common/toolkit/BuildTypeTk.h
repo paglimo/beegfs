@@ -40,9 +40,9 @@ class BuildTypeTk
 
       static inline void checkDebugBuildTypes()
       {
-         if(getCurrentDebugBuildType() != getCommonLibDebugBuildType() )
-            throw InvalidConfigException("Debug build types differ. Check your release/debug make "
-               "settings.");
+         // if(getCurrentDebugBuildType() != getCommonLibDebugBuildType() )
+         //    throw InvalidConfigException("Debug build types differ. Check your release/debug make "
+         //       "settings.");
       }
 };
 

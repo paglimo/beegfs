@@ -2,6 +2,8 @@
 #include <program/Program.h>
 #include <common/net/message/storage/creating/MkFileMsg.h>
 #include <common/net/message/storage/creating/MkFileRespMsg.h>
+#include <common/net/message/storage/attribs/StatMsg.h>
+#include <common/net/message/storage/attribs/StatRespMsg.h>
 #include <common/net/message/storage/lookup/LookupIntentRespMsg.h>
 #include <common/storage/striping/Raid0Pattern.h>
 #include <common/toolkit/SessionTk.h>
@@ -184,6 +186,10 @@ std::unique_ptr<MirroredMessageResponseState> LookupIntentMsgEx::executeLocally(
 
          response.addResponseStat(lookupRes, statData);
 
+         // Use actual createRes to prevent incorrect forwarding to secondary
+         // See LookupIntentMsgEx::changeObservableState() for more details
+         response.addResponseCreate(createRes);
+
          return boost::make_unique<ResponseState>(std::move(response));
       }
    }
@@ -192,7 +198,6 @@ std::unique_ptr<MirroredMessageResponseState> LookupIntentMsgEx::executeLocally(
    if (getIntentFlags() & LOOKUPINTENTMSG_FLAG_REVALIDATE)
    {
       LOG_DBG(GENERAL, SPAM, "Revalidate");
-
       auto revalidateRes = revalidate(&diskEntryInfo, inodeData.getMetaVersion());
       response.addResponseRevalidate(revalidateRes);
 
@@ -291,20 +296,94 @@ FhgfsOpsErr LookupIntentMsgEx::lookup(const std::string& parentEntryID,
       lookupRes1 = FhgfsOpsErr_SUCCESS;
       outInodeDataOutdated = isFileOpen;
 
-      // If the file inode is not inlined and the intent includes the creation flag,
-      // we need to use a different overload of getEntryData() to correctly retrieve the
-      // inode disk data for non-inlined inode(s) and prevent potential crashes due to
-      // race conditions between create and hardlink creation.
-      // If create flag is set, fetch full inode disk data using non-inlined inode.
-      int createFlag = getIntentFlags() & LOOKUPINTENTMSG_FLAG_CREATE;
-      if (!outEntryInfo->getIsInlined() && createFlag)
+      // Fast path: if the inode is inlined, we already have the stat data
+      if (outEntryInfo->getIsInlined())
+      {
+         metaStore->releaseDir(parentEntryID);
+         return lookupRes1;
+      }
+
+      // Slow path: non-inlined inodes with create or revalidate flag
+      int intentFlags = getIntentFlags();
+
+      // For non-inlined inodes with CREATE or REVALIDATE flags, we need additional processing:
+      // - CREATE: Use a different overload of getEntryData() to correctly retrieve the inode
+      //   disk data and prevent potential crashes due to race conditions between lookup
+      //   operation and hardlink creation.
+      // - REVALIDATE: Fetch metadata version either locally or via remote stat.
+      if (intentFlags & LOOKUPINTENTMSG_FLAG_CREATE)
       {
          FhgfsOpsErr getRes = metaStore->getEntryData(outEntryInfo, outInodeStoreData);
          if (getRes != FhgfsOpsErr_SUCCESS)
             lookupRes1 = getRes;
+
+         // Check for NULL stripe pattern after getEntryData()
+         // This can happen when due to races, dangling dentry is left without
+         // a valid inode associated with it. In such cases, stripe pattern will be
+         // nullptr in outInodeStoreData and since we set FhgfsOpsErr_SUCCESS instead
+         // of FhgfsOpsErr_EXISTS during create() call - so as per result from changeObservableState()
+         // it will try to forward call to secondary and thats where crash happen while trying to
+         // serialize stripePattern (which is null). Check for nullptr and set correct lookup result.
+         if (!outInodeStoreData->getStripePattern())
+         {
+            LOG_DBG(GENERAL, WARNING, "Inode with NULL stripe pattern (likely dangling dentry).",
+                    ("entryID", outEntryInfo->getEntryID()), ("parentEntryID", parentEntryID),
+                    ("entryName", entryName));
+            lookupRes1 = FhgfsOpsErr_PATHNOTEXISTS;
+         }
+      }
+      else if (intentFlags & LOOKUPINTENTMSG_FLAG_REVALIDATE)
+      {
+         App* app = Program::getApp();
+         NumNodeID ownerNodeID = outEntryInfo->getOwnerNodeID();
+         bool isLocalInode = ((!isMirrored() && ownerNodeID == app->getLocalNode().getNumID()) ||
+            (isMirrored() && ownerNodeID.val() == app->getMetaBuddyGroupMapper()->getLocalGroupID()));
+
+         if (isLocalInode)
+         {
+            //inode is non-inlined, revalidate Flag is set and data is on this node
+            FhgfsOpsErr getRes = metaStore->getEntryData(outEntryInfo, outInodeStoreData);
+            if (getRes != FhgfsOpsErr_SUCCESS)
+               lookupRes1 = getRes;
+         }
+         else
+         {
+            const char* logContext = "Direct stat for revalidate in non-inlined inode case";
+            // inode is non-inlined, revalidate Flag is set and data is not on this node, so we do a direct stat to get metaVersion
+            StatMsg statMsg(outEntryInfo);
+            RequestResponseArgs rrArgs(NULL, &statMsg, NETMSGTYPE_StatResp);
+            RequestResponseNode rrNode(ownerNodeID, app->getMetaNodes());
+            rrNode.setTargetStates(app->getMetaStateStore());
+
+
+            if (outEntryInfo->getIsBuddyMirrored())
+               rrNode.setMirrorInfo(app->getMetaBuddyGroupMapper(), false);
+            FhgfsOpsErr resp = MessagingTk::requestResponseNode(&rrNode, &rrArgs);
+            if (unlikely(resp != FhgfsOpsErr_SUCCESS))
+            {
+               LogContext(logContext).logErr("Communication with metadata server failed. "
+                  "nodeID: " + ownerNodeID.str());
+               lookupRes1 = resp;
+               metaStore->releaseDir(parentEntryID);
+               return lookupRes1;
+            }
+
+            // response received
+            const auto statRespMsg = (StatRespMsg*) rrArgs.outRespMsg.get();
+            FhgfsOpsErr statRes = (FhgfsOpsErr) statRespMsg->getResult();
+            if (statRes != FhgfsOpsErr_SUCCESS)
+            {
+               LogContext(logContext).logErr("Stat Failed!. nodeID: " + ownerNodeID.str()
+                  + "; entryID: " + outEntryInfo->getEntryID());
+               lookupRes1 = statRes;
+               metaStore->releaseDir(parentEntryID);
+               return lookupRes1;
+            }
+            StatData* statData = statRespMsg->getStatData();
+            outInodeStoreData->setMetaVersion(statData->getMetaVersion());
+         }
       }
    }
-
    metaStore->releaseDir(parentEntryID);
    return lookupRes1;
 }

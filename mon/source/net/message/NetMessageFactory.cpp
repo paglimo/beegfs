@@ -5,6 +5,7 @@
 #include <common/net/message/control/DummyMsg.h>
 #include <common/net/message/control/GenericResponseMsg.h>
 #include <common/net/message/nodes/GetClientStatsRespMsg.h>
+#include <common/net/message/nodes/GetClientStatsV2RespMsg.h>
 #include <common/net/message/nodes/GetMirrorBuddyGroupsRespMsg.h>
 #include <common/net/message/nodes/GetNodesRespMsg.h>
 #include <common/net/message/nodes/GetTargetMappingsRespMsg.h>
@@ -31,6 +32,7 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_FindOwnerResp: { msg = new FindOwnerRespMsg(); } break;
       case NETMSGTYPE_GenericResponse: { msg = new GenericResponseMsg(); } break;
       case NETMSGTYPE_GetClientStatsResp: { msg = new GetClientStatsRespMsg(); } break;
+      case NETMSGTYPE_GetClientStatsV2Resp: { msg = new GetClientStatsV2RespMsg(); } break;
       case NETMSGTYPE_GetMirrorBuddyGroupsResp: { msg = new GetMirrorBuddyGroupsRespMsg(); } break;
       case NETMSGTYPE_GetNodesResp: { msg = new GetNodesRespMsg(); } break;
       case NETMSGTYPE_GetTargetMappingsResp: { msg = new GetTargetMappingsRespMsg(); } break;

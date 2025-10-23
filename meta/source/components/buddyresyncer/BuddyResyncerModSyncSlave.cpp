@@ -11,9 +11,9 @@
 #include <program/Program.h>
 #include <toolkit/XAttrTk.h>
 
-BuddyResyncerModSyncSlave::BuddyResyncerModSyncSlave(BuddyResyncJob& parentJob,
+BuddyResyncerModSyncSlave::BuddyResyncerModSyncSlave(BuddyResyncJob& BuddyResyncParentJob,
       MetaSyncCandidateStore* syncCandidates, uint8_t slaveID, const NumNodeID& buddyNodeID) :
-   SyncSlaveBase("BuddyResyncerModSyncSlave_" + StringTk::uintToStr(slaveID), parentJob,
+   SyncSlaveBase("BuddyResyncerModSyncSlave_" + StringTk::uintToStr(slaveID), BuddyResyncParentJob,
          buddyNodeID),
    syncCandidates(syncCandidates)
 {
@@ -121,7 +121,7 @@ FhgfsOpsErr BuddyResyncerModSyncSlave::streamCandidates(Socket& socket)
 
             // Since this error prevents the resync from reaching a GOOD state on the secondary,
             // we abort here.
-            parentJob->abort(true);
+            BuddyResyncParentJob->abort(true);
 
             // terminate the current stream, start a new one if necessary. we could (in theory)
             // reuse the current stream, but terminating a stream that has seen an error is simpler

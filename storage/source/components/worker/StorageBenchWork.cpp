@@ -33,7 +33,7 @@ void StorageBenchWork::process(char* bufIn, unsigned bufInLen, char* bufOut,
          bufOffset += currentReadSize;
       }
 
-      app->getNodeOpStats()->updateNodeOp(0, StorageOpCounter_READOPS,
+      app->getNodeOpStats()->updateNodeOp(IPAddress(), StorageOpCounter_READOPS,
          this->bufLen, NETMSG_DEFAULT_USERID);
    }
    else
@@ -55,7 +55,7 @@ void StorageBenchWork::process(char* bufIn, unsigned bufInLen, char* bufOut,
          bufOffset += currentWriteSize;
       }
 
-      app->getNodeOpStats()->updateNodeOp(0, StorageOpCounter_WRITEOPS,
+      app->getNodeOpStats()->updateNodeOp(IPAddress(), StorageOpCounter_WRITEOPS,
          this->bufLen, NETMSG_DEFAULT_USERID);
    }
    else

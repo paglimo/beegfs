@@ -14,7 +14,7 @@ const struct NetMessageOps HeartbeatRequestMsgEx_Ops = {
 };
 
 bool __HeartbeatRequestMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "HeartbeatRequest incoming";

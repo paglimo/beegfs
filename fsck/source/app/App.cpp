@@ -17,8 +17,6 @@ App::App(int argc, char** argv)
    this->appResult = APPCODE_NO_ERROR;
 
    this->cfg = NULL;
-   this->netFilter = NULL;
-   this->tcpOnlyFilter = NULL;
    this->log = NULL;
    this->mgmtNodes = NULL;
    this->metaNodes = NULL;
@@ -58,8 +56,6 @@ App::~App()
    SAFE_DELETE(this->targetMapper);
    SAFE_DELETE(this->internodeSyncer);
    SAFE_DELETE(this->log);
-   SAFE_DELETE(this->tcpOnlyFilter);
-   SAFE_DELETE(this->netFilter);
    SAFE_DELETE(this->cfg);
    SAFE_DELETE(this->runMode);
 
@@ -140,6 +136,9 @@ void App::runNormal()
       return;
    }
 
+   // Detect ipv6
+   Socket::checkAndCacheIPv6Availability(cfg->getConnClientPort(), cfg->getConnDisableIPv6());
+
    initDataObjects(argc, argv);
 
    // wait for mgmtd
@@ -205,8 +204,8 @@ void App::runNormal()
 
 void App::initDataObjects(int argc, char** argv)
 {
-   this->netFilter = new NetFilter(cfg->getConnNetFilterFile() );
-   this->tcpOnlyFilter = new NetFilter(cfg->getConnTcpOnlyFilterFile() );
+   this->netFilter = loadNetworkList(cfg->getConnNetFilterFile());
+   this->tcpOnlyFilter = loadNetworkList(cfg->getConnTcpOnlyFilterFile());
 
    Logger::createLogger(cfg->getLogLevel(), cfg->getLogType(), cfg->getLogNoDate(),
          cfg->getLogStdFile(), cfg->getLogNumLines(), cfg->getLogNumRotatedFiles());
@@ -242,7 +241,7 @@ void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 
    if(cfg->getConnUseRDMA() && RDMASocket::rdmaDevicesExist() )
    {
-      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(outList);
+      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(this->allowedInterfaces, outList);
       if (foundRdmaInterfaces)
          outList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces}); // re-sort the niclist
    }
@@ -251,7 +250,7 @@ void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 void App::findAllowedInterfaces(NicAddressList& outList) const
 {
    // discover local NICs and filter them
-   NetworkInterfaceCard::findAllInterfaces(allowedInterfaces, outList);
+   NetworkInterfaceCard::findAll(&allowedInterfaces, false, cfg->getConnDisableIPv6(), &outList);
    outList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces});
 }
 
@@ -280,7 +279,7 @@ void App::initComponents()
    // Note: We choose a random udp port here to avoid conflicts with the client
    unsigned short udpListenPort = 0;
 
-   this->dgramListener = new DatagramListener(netFilter, localNicList, ackStore, udpListenPort,
+   this->dgramListener = new DatagramListener(&netFilter, localNicList, ackStore, udpListenPort,
       this->cfg->getConnRestrictOutboundInterfaces());
 
    // update the local node info with udp port
@@ -419,16 +418,16 @@ void App::logInfos()
    logUsableNICs(log, nicList);
 
    // print net filters
-   if ( netFilter->getNumFilterEntries() )
+   if(!netFilter.empty())
    {
-      this->log->log(2,
-         std::string("Net filters: ") + StringTk::uintToStr(netFilter->getNumFilterEntries()));
+      log->log(Log_WARNING, std::string("Net filters: ") +
+         StringTk::uintToStr(netFilter.size()));
    }
 
-   if(tcpOnlyFilter->getNumFilterEntries() )
+   if(!tcpOnlyFilter.empty())
    {
       this->log->log(Log_WARNING, std::string("TCP-only filters: ") +
-         StringTk::uintToStr(tcpOnlyFilter->getNumFilterEntries() ) );
+         StringTk::uintToStr(tcpOnlyFilter.size()));
    }
 }
 
@@ -447,7 +446,7 @@ bool App::waitForMgmtNode()
    unsigned udpMgmtdPort = cfg->getConnMgmtdPort();
    std::string mgmtdHost = cfg->getSysMgmtdHost();
 
-   RegistrationDatagramListener regDGramLis(this->netFilter, this->localNicList, this->ackStore,
+   RegistrationDatagramListener regDGramLis(&this->netFilter, this->localNicList, this->ackStore,
       udpListenPort, this->cfg->getConnRestrictOutboundInterfaces());
 
    regDGramLis.start();

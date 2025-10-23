@@ -1,6 +1,7 @@
 #include <common/toolkit/StorageTk.h>
 #include <common/toolkit/NodesTk.h>
 #include "AbstractApp.h"
+#include "common/net/sock/IPAddress.h"
 
 bool AbstractApp::didRunTimeInit = false;
 
@@ -127,7 +128,6 @@ bool AbstractApp::basicDestructions()
 void AbstractApp::logUsableNICs(LogContext* log, NicAddressList& nicList)
 {
    // list usable network interfaces
-   std::string nicListStr;
    std::string extendedNicListStr;
 
    for(NicAddressListIter nicIter = nicList.begin(); nicIter != nicList.end(); nicIter++)
@@ -141,24 +141,19 @@ void AbstractApp::logUsableNICs(LogContext* log, NicAddressList& nicList)
       else
          nicTypeStr = "Unknown";
 
-      nicListStr += std::string(nicIter->name) + "(" + nicTypeStr + ")" + " ";
-
       extendedNicListStr += "\n+ ";
       extendedNicListStr += NetworkInterfaceCard::nicAddrToString(&(*nicIter) ) + " ";
    }
 
-   nicListStr = std::string("Usable NICs: ") + nicListStr;
-   extendedNicListStr = std::string("Extended list of usable NICs: ") + extendedNicListStr;
+   extendedNicListStr = std::string("Usable NICs: ") + extendedNicListStr;
 
    if (log)
    {
-      log->log(Log_WARNING, nicListStr);
-      log->log(Log_DEBUG, extendedNicListStr);
+      log->log(Log_WARNING, extendedNicListStr);
    }
    else
    {
-      LOG(GENERAL, WARNING, nicListStr);
-      LOG(GENERAL, DEBUG, extendedNicListStr);
+      LOG(GENERAL, WARNING, extendedNicListStr);
    }
 }
 
@@ -185,17 +180,19 @@ void AbstractApp::updateLocalNicListAndRoutes(LogContext* log, NicAddressList& l
    }
 }
 
-bool AbstractApp::initNoDefaultRouteList(NetVector* outNets)
+bool AbstractApp::initNoDefaultRouteList(NetFilter* outNets)
 {
    std::string connNoDefaultRoute = getCommonConfig()->getConnNoDefaultRoute();
    StringVector cidrs;
    StringTk::explodeEx(connNoDefaultRoute, ',', true, &cidrs);
    for (auto& c : cidrs)
    {
-      IPv4Network net;
-      if (!IPv4Network::parse(c, net))
+      try {
+         outNets->emplace_back(IPNetwork::fromCidr(c));
+      } catch (const std::exception &e) {
+         LOG(GENERAL, WARNING, e.what());
          return false;
-      outNets->push_back(net);
+      }
    }
    return true;
 }

@@ -57,15 +57,15 @@ extern void __NodeConnPool_statsAddNic(NodeConnPool* this, NicAddrType_t nicType
 extern void __NodeConnPool_statsRemoveNic(NodeConnPool* this, NicAddrType_t nicType);
 
 extern void __NodeConnPool_setCompleteFail(NodeConnPool* this);
-extern void __NodeConnPool_setConnSuccess(NodeConnPool* this, struct in_addr lastSuccessPeerIP,
+extern void __NodeConnPool_setConnSuccess(NodeConnPool* this, struct in6_addr lastSuccessPeerIP,
    NicAddrType_t lastSuccessNicType);
-extern bool __NodeConnPool_equalsLastSuccess(NodeConnPool* this, struct in_addr lastSuccessPeerIP,
+extern bool __NodeConnPool_equalsLastSuccess(NodeConnPool* this, struct in6_addr lastSuccessPeerIP,
    NicAddrType_t lastSuccessNicType);
 extern bool __NodeConnPool_isLastSuccessInitialized(NodeConnPool* this);
 extern bool __NodeConnPool_shouldPrintConnectedLogMsg(NodeConnPool* this,
-   struct in_addr currentPeerIP, NicAddrType_t currentNicType);
+   struct in6_addr currentPeerIP, NicAddrType_t currentNicType);
 extern bool __NodeConnPool_shouldPrintConnectFailedLogMsg(NodeConnPool* this,
-   struct in_addr currentPeerIP, NicAddrType_t currentNicType);
+   struct in6_addr currentPeerIP, NicAddrType_t currentNicType);
 
 
 extern void NodeConnPool_getStats(NodeConnPool* this, NodeConnPoolStats* outStats);
@@ -113,7 +113,7 @@ struct NodeConnPoolStats
  */
 struct NodeConnPoolErrorState
 {
-   struct in_addr lastSuccessPeerIP; // the last IP that we connected to successfully
+   struct in6_addr lastSuccessPeerIP; // the last IP that we connected to successfully
    NicAddrType_t lastSuccessNicType; // the last nic type that we connected to successfully
    bool wasLastTimeCompleteFail; // true if last attempt failed on all routes
 };

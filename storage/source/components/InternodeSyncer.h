@@ -20,6 +20,7 @@ class InternodeSyncer : public PThread
       static bool downloadAndSyncNodes();
       static bool downloadAndSyncTargetMappings();
       static bool downloadAndSyncMirrorBuddyGroups();
+      static bool downloadAndSyncMetaMirrorBuddyGroups();
       static bool downloadAndSyncStoragePools();
 
       static bool downloadAllExceededQuotaLists(

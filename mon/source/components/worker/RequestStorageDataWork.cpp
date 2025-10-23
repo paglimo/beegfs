@@ -60,11 +60,13 @@ void RequestStorageDataWork::process(char* bufIn, unsigned bufInLen,
             node->setLastStatRequestTime(lastStatsRequestTime);
          }
 
+         bool useIPv6Fields = storageRspMsg->isMsgHeaderFeatureFlagSet(RequestStorageDataRespMsg::MsgFlags::NODE_SUPPORTS_IPV6);
+
          if (collectClientOpsByNode)
-            result.ipOpsUnorderedMap = ClientOpsRequestor::request(*node, false);
+            result.ipOpsUnorderedMap = ClientOpsRequestor::request(*node, false, useIPv6Fields);
 
          if (collectClientOpsByUser)
-            result.userOpsUnorderedMap = ClientOpsRequestor::request(*node, true);
+            result.userOpsUnorderedMap = ClientOpsRequestor::request(*node, true, useIPv6Fields);
       }
    }
 

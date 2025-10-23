@@ -1,6 +1,7 @@
 #include <common/nodes/ConnectionListIter.h>
 #include <common/net/sock/NicAddressListIter.h>
 #include <common/net/sock/NicAddressStatsListIter.h>
+#include <common/toolkit/NicAddressFilter.h>
 #include <common/toolkit/list/StrCpyListIter.h>
 #include <common/toolkit/list/UInt16ListIter.h>
 #include <common/toolkit/tree/PointerRBTree.h>
@@ -10,7 +11,7 @@
 #include <linux/sort.h>
 
 struct nicaddr_sort_entry {
-   StrCpyList* preferences;
+   NicAddressFilter *nicAddressFilter;
    NicAddress* addr;
 };
 
@@ -19,26 +20,15 @@ static int nicaddr_sort_comp(const void* l, const void* r)
    const struct nicaddr_sort_entry* lhs = l;
    const struct nicaddr_sort_entry* rhs = r;
 
-   StrCpyListIter it;
+   NicAddressFilter *filter = lhs->nicAddressFilter;
 
-   StrCpyListIter_init(&it, lhs->preferences);
-   while (!StrCpyListIter_end(&it)) {
-      const char* value = StrCpyListIter_value(&it);
+   size_t a = NicAddressFilter_getPosition(filter, lhs->addr);
+   size_t b = NicAddressFilter_getPosition(filter, rhs->addr);
 
-      if (strcmp(value, lhs->addr->name) == 0)
-         return -1;
-      if (strcmp(value, rhs->addr->name) == 0)
-         return 1;
+   if (a != b)
+      return (int) (a > b) - (int) (b > a);
 
-      StrCpyListIter_next(&it);
-   }
-
-   if (NicAddress_preferenceComp(lhs->addr, rhs->addr))
-      return -1;
-   if (NicAddress_preferenceComp(rhs->addr, lhs->addr))
-      return 1;
-
-   return 0;
+   return NicAddress_preferenceComp(lhs->addr, rhs->addr);
 }
 
 
@@ -78,7 +68,7 @@ void ListTk_cloneNicAddressList(NicAddressList* nicList, NicAddressList* nicList
  * all possible names ever encountered, or none at all.
  */
 void ListTk_cloneSortNicAddressList(NicAddressList* nicList, NicAddressList* nicListClone,
-      StrCpyList* preferences)
+      NicAddressFilter *nicAddressFilter)
 {
    NicAddressListIter listIter;
 
@@ -92,7 +82,7 @@ void ListTk_cloneSortNicAddressList(NicAddressList* nicList, NicAddressList* nic
    NicAddressListIter_init(&listIter, nicList);
 
    while (!NicAddressListIter_end(&listIter)) {
-      p->preferences = preferences;
+      p->nicAddressFilter = nicAddressFilter;
       p->addr = NicAddressListIter_value(&listIter);
 
       NicAddressListIter_next(&listIter);

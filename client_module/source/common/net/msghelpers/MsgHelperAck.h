@@ -7,18 +7,13 @@
 #include <app/App.h>
 
 
-// inliners
-static inline bool MsgHelperAck_respondToAckRequest(App* app, const char* ackID,
-   fhgfs_sockaddr_in* fromAddr, Socket* sock, char* respBuf, size_t bufLen);
-
-
 /**
  * Note: This will only send a response if an ackID has been set.
  *
  * @return true if ackID was set
  */
-bool MsgHelperAck_respondToAckRequest(App* app, const char* ackID,
-   fhgfs_sockaddr_in* fromAddr, Socket* sock, char* respBuf, size_t bufLen)
+static inline bool MsgHelperAck_respondToAckRequest(App* app, const char* ackID,
+   struct sockaddr_in6* fromAddr, Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "Ack response";

@@ -341,7 +341,7 @@ bool __InternodeSyncer_waitForMgmtHeartbeat(InternodeSyncer* this)
 
    const char* hostname = Config_getSysMgmtdHost(this->cfg);
    unsigned short port = Config_getConnMgmtdPort(this->cfg);
-   struct in_addr ipAddr;
+   struct in6_addr ipAddr;
    int i;
 
    HeartbeatRequestMsgEx msg;

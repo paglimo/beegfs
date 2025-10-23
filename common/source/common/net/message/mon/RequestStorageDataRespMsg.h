@@ -9,6 +9,11 @@
 
 class RequestStorageDataRespMsg: public NetMessageSerdes<RequestStorageDataRespMsg>
 {
+   public:
+      struct MsgFlags {
+         static const unsigned NODE_SUPPORTS_IPV6 = 1;
+      };
+
    private:
       std::string nodeID;
       std::string hostnameid;
@@ -52,6 +57,8 @@ class RequestStorageDataRespMsg: public NetMessageSerdes<RequestStorageDataRespM
          this->sessionCount = sessionCount;
          this->statsList = statsList;
          this->storageTargets = storageTargets;
+
+         addMsgHeaderFeatureFlag(MsgFlags::NODE_SUPPORTS_IPV6);
       }
 
       RequestStorageDataRespMsg() :
@@ -64,6 +71,8 @@ class RequestStorageDataRespMsg: public NetMessageSerdes<RequestStorageDataRespM
          this->sessionCount = 0;
          this->statsList = NULL;
          this->storageTargets = NULL;
+
+         addMsgHeaderFeatureFlag(MsgFlags::NODE_SUPPORTS_IPV6);
       }
 
       template<typename This, typename Ctx>
@@ -81,6 +90,10 @@ class RequestStorageDataRespMsg: public NetMessageSerdes<RequestStorageDataRespM
             % obj->sessionCount
             % serdes::backedPtr(obj->statsList, obj->parsed.statsList)
             % serdes::backedPtr(obj->storageTargets, obj->parsed.storageTargets);
+      }
+
+      virtual unsigned getSupportedHeaderFeatureFlagsMask() const {
+         return MsgFlags::NODE_SUPPORTS_IPV6;
       }
 
       NicAddressList& getNicList()

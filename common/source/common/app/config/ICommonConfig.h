@@ -42,6 +42,7 @@ class ICommonConfig
       std::string connTcpOnlyFilterFile; // for IPs that only allow plain TCP (no RDMA etc)
       bool        connRestrictOutboundInterfaces;
       std::string connNoDefaultRoute;
+      bool        connDisableIPv6;
 
       int         connMsgLongTimeout;
       int         connMsgMediumTimeout;
@@ -191,6 +192,11 @@ class ICommonConfig
       std::string getConnNoDefaultRoute() const
       {
          return connNoDefaultRoute;
+      }
+
+      bool getConnDisableIPv6() const
+      {
+         return connDisableIPv6;
       }
 
       int getConnMsgLongTimeout() const

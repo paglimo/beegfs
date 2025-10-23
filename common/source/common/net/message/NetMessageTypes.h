@@ -28,6 +28,8 @@
 #define NETMSGTYPE_GenericDebugResp                  1030
 #define NETMSGTYPE_GetClientStats                    1031
 #define NETMSGTYPE_GetClientStatsResp                1032
+#define NETMSGTYPE_GetClientStatsV2                  1033
+#define NETMSGTYPE_GetClientStatsV2Resp              1034
 #define NETMSGTYPE_RefreshCapacityPools              1035
 #define NETMSGTYPE_StorageBenchControlMsg            1037
 #define NETMSGTYPE_StorageBenchControlMsgResp        1038
@@ -176,10 +178,10 @@
 #define NETMSGTYPE_SetFilePatternResp              2124
 #define NETMSGTYPE_CpChunkPaths                    2125
 #define NETMSGTYPE_CpChunkPathsResp                2126
-#define NETMSGTYPE_ChunkBalance                    2127
-#define NETMSGTYPE_ChunkBalanceResp                2128
-#define NETMSGTYPE_StripePatternUpdate             2129
-#define NETMSGTYPE_StripePatternUpdateResp         2130
+#define NETMSGTYPE_StartChunkBalance               2127
+#define NETMSGTYPE_StartChunkBalanceResp           2128
+#define NETMSGTYPE_UpdateStripePattern             2129
+#define NETMSGTYPE_UpdateStripePatternResp         2130
 #define NETMSGTYPE_SetFileState                    2131
 #define NETMSGTYPE_SetFileStateResp                2132
 

@@ -1,3 +1,4 @@
+#include "common/net/sock/IpAddress.h"
 #include <common/net/sock/StandardSocket.h>
 #include <common/toolkit/Serialization.h>
 #include <common/toolkit/SocketTk.h>
@@ -155,10 +156,14 @@ bool StandardSocket_init(StandardSocket* this, int domain, int type, int protoco
    // normal init part
 
    this->sock = NULL;
-
    this->sockDomain = domain;
 
-   return _StandardSocket_initSock(this, domain, type, protocol);
+   if (!_StandardSocket_initSock(this, domain, type, protocol))
+   {
+      return false;
+   }
+
+   return true;
 }
 
 StandardSocket* StandardSocket_construct(int domain, int type, int protocol)
@@ -173,16 +178,6 @@ StandardSocket* StandardSocket_construct(int domain, int type, int protocol)
    }
 
    return this;
-}
-
-StandardSocket* StandardSocket_constructUDP(void)
-{
-   return StandardSocket_construct(PF_INET, SOCK_DGRAM, 0);
-}
-
-StandardSocket* StandardSocket_constructTCP(void)
-{
-   return StandardSocket_construct(PF_INET, SOCK_STREAM, 0);
 }
 
 void _StandardSocket_uninit(Socket* this)
@@ -207,7 +202,7 @@ bool _StandardSocket_initSock(StandardSocket* this, int domain, int type, int pr
 #endif
    if(createRes < 0)
    {
-      //printk_fhgfs(KERN_WARNING, "Failed to create socket\n");
+      printk_fhgfs(KERN_WARNING, "Failed to create socket %d\n", createRes);
       return false;
    }
 
@@ -345,12 +340,11 @@ bool StandardSocket_setTcpCork(StandardSocket* this, bool enable)
    return r == 0;
 }
 
-bool _StandardSocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigned short port)
+bool _StandardSocket_connectByIP(Socket* this, struct in6_addr ipaddress, unsigned short port)
 {
    // note: this might look a bit strange (it's kept similar to the c++ version)
 
    // note: error messages here would flood the log if hosts are unreachable on primary interface
-
 
    const int timeoutMS = STANDARDSOCKET_CONNECT_TIMEOUT_MS;
 
@@ -358,17 +352,15 @@ bool _StandardSocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigne
 
    int connRes;
 
-   struct sockaddr_in serveraddr =
+   Beegfs_Sockaddr bsa = {0};
+   if (!bsa_make(thisCast->sockDomain, ipaddress, port, &bsa))
    {
-      .sin_family = AF_INET,
-      .sin_addr = ipaddress,
-      .sin_port = htons(port),
-   };
+      printk_fhgfs(KERN_INFO, "connectByIP: Couldn't create BeeGFS_Sockaddr with domain %d\n",
+                   thisCast->sockDomain);
+      return false;
+   }
 
-   connRes = kernel_connect(thisCast->sock,
-      (struct sockaddr*) &serveraddr,
-      sizeof(serveraddr),
-      O_NONBLOCK);
+   connRes = kernel_connect(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa), O_NONBLOCK);
 
    if(connRes)
    {
@@ -395,7 +387,7 @@ bool _StandardSocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigne
 
             if(!this->peername[0])
             {
-               SocketTk_endpointAddrToStrNoAlloc(this->peername, SOCKET_PEERNAME_LEN, ipaddress, port);
+               SocketTk_endpointToStr(this->peername, sizeof this->peername, ipaddress, port);
                this->peerIP = ipaddress;
             }
 
@@ -415,7 +407,7 @@ bool _StandardSocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigne
       // set peername if not done so already (e.g. by connect(hostname) )
       if(!this->peername[0])
       {
-         SocketTk_endpointAddrToStrNoAlloc(this->peername, SOCKET_PEERNAME_LEN, ipaddress, port);
+         SocketTk_endpointToStr(this->peername, sizeof this->peername, ipaddress, port);
          this->peerIP = ipaddress;
       }
 
@@ -426,22 +418,24 @@ bool _StandardSocket_connectByIP(Socket* this, struct in_addr ipaddress, unsigne
 }
 
 
-bool _StandardSocket_bindToAddr(Socket* this, struct in_addr ipaddress, unsigned short port)
+bool _StandardSocket_bindToAddr(Socket* this, struct in6_addr ipaddress, unsigned short port)
 {
    StandardSocket* thisCast = (StandardSocket*)this;
-
-   struct sockaddr_in bindAddr;
+   Beegfs_Sockaddr bsa = {0};
    int bindRes;
 
-   bindAddr.sin_family = thisCast->sockDomain;
-   bindAddr.sin_addr = ipaddress;
-   bindAddr.sin_port = htons(port);
+   if (! bsa_make(thisCast->sockDomain, ipaddress, port, &bsa))
+   {
+      return false;
+   }
 
-   bindRes = kernel_bind(thisCast->sock, (struct sockaddr*)&bindAddr, sizeof(bindAddr) );
+   bindRes = kernel_bind(thisCast->sock, bsa_ptr(&bsa), bsa_size(&bsa));
 
    if(bindRes)
    {
-      printk_fhgfs(KERN_WARNING, "Failed to bind socket. ErrCode: %d\n", bindRes);
+      char endpointStr[SOCKET_IPADDRSTR_LEN];
+      SocketTk_endpointToStr(endpointStr, sizeof endpointStr, ipaddress, port);
+      printk_fhgfs(KERN_WARNING, "Failed to bind address %s to socket (sockDomain=%d). ErrCode: %d\n", endpointStr, thisCast->sockDomain, bindRes);
       return false;
    }
 
@@ -463,7 +457,7 @@ bool _StandardSocket_listen(Socket* this)
       return false;
    }
 
-   snprintf(this->peername, SOCKET_PEERNAME_LEN, "Listen(Port: %d)", this->boundPort);
+   snprintf(this->peername, sizeof this->peername, "Listen(Port: %d)", this->boundPort);
 
    return true;
 }
@@ -546,32 +540,31 @@ ssize_t _StandardSocket_recvT(Socket* this, struct iov_iter* iter, int flags, in
 
 
 ssize_t _StandardSocket_sendto(Socket* this, struct iov_iter* iter, int flags,
-   fhgfs_sockaddr_in *to)
+   struct sockaddr_in6 *to)
 {
    StandardSocket* thisCast = (StandardSocket*)this;
    struct socket *sock = thisCast->sock;
 
    int sendRes;
-   size_t len;
-   struct sockaddr_in toSockAddr;
+   size_t len = iov_iter_count(iter);
+   Beegfs_Sockaddr bsa;
 
-   struct msghdr msg =
-   {
-      .msg_control      = NULL,
-      .msg_controllen   = 0,
-      .msg_flags        = flags | MSG_NOSIGNAL,
-      .msg_name         = (struct sockaddr*)(to ? &toSockAddr : NULL),
-      .msg_namelen      = sizeof(toSockAddr),
-      .msg_iter         = *iter,
-   };
+   struct msghdr msg = {0};
 
-   len = iov_iter_count(iter);
+   msg.msg_control      = NULL;
+   msg.msg_controllen   = 0;
+   msg.msg_flags        = flags | MSG_NOSIGNAL;
+   msg.msg_iter         = *iter;
 
    if (to)
    {
-      toSockAddr.sin_family = thisCast->sockDomain;
-      toSockAddr.sin_addr = to->addr;
-      toSockAddr.sin_port = to->port;
+      if (! bsa_make(thisCast->sockDomain, to->sin6_addr, beegfs_get_port(to), &bsa))
+      {
+         printk_fhgfs(KERN_WARNING, "_StandardSocket_sendto: Socket doesn't support destination address family.\n");
+         return -EINVAL;
+      }
+      msg.msg_name         = bsa_ptr(&bsa);
+      msg.msg_namelen      = bsa_size(&bsa);
    }
 
    sendRes = beegfs_sendmsg(sock, &msg, len);
@@ -583,24 +576,23 @@ ssize_t _StandardSocket_sendto(Socket* this, struct iov_iter* iter, int flags,
 }
 
 ssize_t StandardSocket_recvfrom(StandardSocket* this, struct iov_iter* iter, int flags,
-   fhgfs_sockaddr_in *from)
+   struct sockaddr_in6 *from)
 {
    int recvRes;
-   size_t len;
-   struct sockaddr_in fromSockAddr;
+   size_t len = iov_iter_count(iter);
    struct socket *sock = this->sock;
+
+   Beegfs_Sockaddr bsa = bsa_make_for_recv();
 
    struct msghdr msg =
    {
       .msg_control      = NULL,
       .msg_controllen   = 0,
       .msg_flags        = flags,
-      .msg_name         = (struct sockaddr*)&fromSockAddr,
-      .msg_namelen      = sizeof(fromSockAddr),
+      .msg_name         = bsa_ptr(&bsa),
+      .msg_namelen      = bsa_size(&bsa),
       .msg_iter         = *iter,
    };
-
-   len = iov_iter_count(iter);
 
    recvRes = beegfs_recvmsg(sock, &msg, len, flags);
 
@@ -609,8 +601,16 @@ ssize_t StandardSocket_recvfrom(StandardSocket* this, struct iov_iter* iter, int
 
    if(from)
    {
-      from->addr = fromSockAddr.sin_addr;
-      from->port = fromSockAddr.sin_port;
+      if (bsa_ptr(&bsa)->sa_family == AF_INET)
+      {
+         struct in6_addr in6 = beegfs_mapped_ipv4(bsa.sa.sin_addr);
+         unsigned short port = ntohs(bsa.sa.sin_port);
+         *from = beegfs_make_sockaddr_in6(in6, port);
+      }
+      else  // AF_INET6
+      {
+         *from = bsa.sa6;
+      }
    }
 
    return recvRes;
@@ -620,7 +620,7 @@ ssize_t StandardSocket_recvfrom(StandardSocket* this, struct iov_iter* iter, int
  * @return -ETIMEDOUT on timeout
  */
 ssize_t StandardSocket_recvfromT(StandardSocket* this, struct iov_iter* iter, int flags,
-   fhgfs_sockaddr_in *from, int timeoutMS)
+   struct sockaddr_in6 *from, int timeoutMS)
 {
    Socket* thisBase = (Socket*)this;
 

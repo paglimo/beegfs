@@ -5,6 +5,8 @@
 #include <common/threading/PThread.h>
 #include <common/toolkit/MessagingTk.h>
 #include "Node.h"
+#include "common/net/sock/IPAddress.h"
+#include "common/net/sock/StandardSocket.h"
 #include "NodeConnPool.h"
 
 #include <mutex>
@@ -21,7 +23,7 @@
  * @param parentNode the node to which this store belogs (to have nodeType for log messages etc).
  * @param nicList an internal copy will be created.
  */
-NodeConnPool::NodeConnPool(Node& parentNode, unsigned short streamPort, const NicAddressList& nicList):
+NodeConnPool::NodeConnPool(Node& parentNode, uint16_t streamPort, const NicAddressList& nicList):
    parentNode(parentNode)
 {
    AbstractApp* app = PThread::getCurrentThreadApp();
@@ -34,14 +36,14 @@ NodeConnPool::NodeConnPool(Node& parentNode, unsigned short streamPort, const Ni
    this->availableConns = 0;
 
    this->maxConns = cfg->getConnMaxInternodeNum();
-   this->fallbackExpirationSecs = cfg->getConnFallbackExpirationSecs();
+   this->fallbackExpirationSecs = cfg->getConnFallbackExpirationSecs();   
    this->isChannelDirect = true;
 
    this->app = app;
    this->streamPort = streamPort;
    memset(&localNicCaps, 0, sizeof(localNicCaps) );
    memset(&stats, 0, sizeof(stats) );
-   memset(&errState, 0, sizeof(errState) );
+   errState.clear();
 }
 
 void NodeConnPool::setLocalNicList(const NicAddressList& localNicList,
@@ -124,7 +126,7 @@ Socket* NodeConnPool::acquireStreamSocket()
 Socket* NodeConnPool::acquireStreamSocketEx(bool allowWaiting)
 {
    PooledSocket* sock = NULL;
-   unsigned short port;
+   uint16_t port;
 
    LogContext log("NodeConn (acquire stream)");
 
@@ -188,25 +190,26 @@ Socket* NodeConnPool::acquireStreamSocketEx(bool allowWaiting)
       std::string endpointStr = boost::lexical_cast<std::string>(parentNode.getNodeType()) + "@" +
          Socket::endpointAddrToStr(iter->ipAddr, port);
 
-      struct in_addr srcIp = {
-         .s_addr = 0
-      };
+      IPAddress srcIp;
+      // If we try to connect to ipv4, this needs to be an ipv4 any address to not mess up the
+      // bindToAddr below
+      if (iter->protocol == 4)
+         srcIp.setAddr(htonl(INADDR_ANY));
+
       if (restrictOutboundInterfaces)
       {
          srcIp = ipSrcMapCopy[iter->ipAddr];
-         if (srcIp.s_addr == 0)
-         {
-            log.log(Log_DEBUG, "Skip NIC, no route for " + endpointStr);
-            continue;
-         }
-         log.log(Log_DEBUG, std::string("Use ") + Socket::ipaddrToStr(srcIp) + " for " + endpointStr);
+         log.log(Log_DEBUG, std::string("Use ") + srcIp.toString() + " for " + endpointStr);
       }
 
-      if(!app->getNetFilter()->isAllowed(iter->ipAddr.s_addr) )
+      if(!app->getNetFilter()->empty() && !std::any_of(app->getNetFilter()->begin(), app->getNetFilter()->end(),
+         [&](auto e) {return e.containsAddress(iter->ipAddr);})) {
          continue;
+      }
 
-      if( (iter->nicType != NICADDRTYPE_STANDARD) &&
-         app->getTcpOnlyFilter()->isContained(iter->ipAddr.s_addr) )
+      if((iter->nicType != NICADDRTYPE_STANDARD) && !app->getTcpOnlyFilter()->empty() &&
+         std::any_of(app->getTcpOnlyFilter()->begin(), app->getTcpOnlyFilter()->end(),
+         [&](auto e) {return e.containsAddress(iter->ipAddr);}))
          continue;
 
       try
@@ -225,7 +228,12 @@ Socket* NodeConnPool::acquireStreamSocketEx(bool allowWaiting)
             case NICADDRTYPE_STANDARD:
             { // TCP
                log.log(Log_DEBUG, "Establishing new TCP connection to: " + endpointStr);
-               newStandardSock = new StandardSocket(PF_INET, SOCK_STREAM);
+               newStandardSock = new StandardSocket(SOCK_STREAM);
+               if (newStandardSock->getFamily() == AF_INET && !iter->ipAddr.isIPv4()) {
+                  // If the socket is in ipv4 fallback mode, we ignore ipv6 addresses
+                  delete newStandardSock;
+                  continue;
+               }
                sock = newStandardSock;
             } break;
 
@@ -260,9 +268,9 @@ Socket* NodeConnPool::acquireStreamSocketEx(bool allowWaiting)
          if(newStandardSock)
             applySocketOptionsPreConnect(newStandardSock);
 
-         if (srcIp.s_addr)
-            sock->bindToAddr(srcIp.s_addr, 0);
-         sock->connect(&iter->ipAddr, port);
+         sock->bindToAddr(srcIp.toSocketAddress(0));
+
+         sock->connect(iter->ipAddr.toSocketAddress(port));
 
          if(errState.shouldPrintConnectedLogMsg(sock->getPeerIP(), sock->getSockType() ) )
          {
@@ -576,7 +584,7 @@ void NodeConnPool::authenticateChannel(Socket* sock)
    AuthenticateChannelMsg authMsg(authHash);
    const auto msgBuf = MessagingTk::createMsgVec(authMsg);
 
-   sock->sendto(&msgBuf[0], msgBuf.size(), 0, NULL, 0);
+   sock->sendto(&msgBuf[0], msgBuf.size(), 0, NULL);
 }
 
 void NodeConnPool::makeChannelIndirect(Socket* sock)
@@ -584,14 +592,14 @@ void NodeConnPool::makeChannelIndirect(Socket* sock)
    SetChannelDirectMsg directMsg(false);
    const auto msgBuf = MessagingTk::createMsgVec(directMsg);
 
-   sock->sendto(&msgBuf[0], msgBuf.size(), 0, NULL, 0);
+   sock->sendto(&msgBuf[0], msgBuf.size(), 0, NULL);
 }
 
 /**
  * @param streamPort value 0 will be ignored
  * @param nicList will be copied
  */
-bool NodeConnPool::updateInterfaces(unsigned short streamPort, const NicAddressList& nicList)
+bool NodeConnPool::updateInterfaces(uint16_t streamPort, const NicAddressList& nicList)
 {
    bool hasChanged = false;
    {

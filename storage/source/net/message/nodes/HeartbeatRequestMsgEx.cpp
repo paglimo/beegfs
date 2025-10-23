@@ -18,7 +18,7 @@ bool HeartbeatRequestMsgEx::processIncoming(ResponseContext& ctx)
 
    ctx.sendResponse(hbMsg);
 
-   log.log(Log_DEBUG, std::string("Heartbeat req ip:") + StringTk::uintToHexStr(ctx.getSocket()->getPeerIP()));
+   log.log(Log_DEBUG, std::string("Heartbeat req ip:") + ctx.getSocket()->getPeerIP().toString());
 
    app->getNodeOpStats()->updateNodeOp(ctx.getSocket()->getPeerIP(), StorageOpCounter_HEARTBEAT,
       getMsgHeaderUserID() );

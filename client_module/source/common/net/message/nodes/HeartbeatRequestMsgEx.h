@@ -11,7 +11,7 @@ static inline void HeartbeatRequestMsgEx_init(HeartbeatRequestMsgEx* this);
 
 // virtual functions
 extern bool __HeartbeatRequestMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 
 
 struct HeartbeatRequestMsgEx

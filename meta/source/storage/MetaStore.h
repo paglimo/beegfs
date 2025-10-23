@@ -15,6 +15,7 @@
 #include <storage/IncompleteInode.h>
 #include <storage/MkFileDetails.h>
 #include <session/EntryLock.h>
+
 #include "DirEntry.h"
 #include "InodeDirStore.h"
 #include "InodeFileStore.h"
@@ -29,6 +30,7 @@ typedef std::pair<MetaFileHandle, FhgfsOpsErr>  MetaFileHandleRes;
  */
 class MetaStore
 {
+   friend class ChunkBalancerMetaSlave;
    public:
       DirInode* referenceDir(const std::string& dirID, const bool isBuddyMirrored,
          const bool forceLoad);
@@ -79,7 +81,7 @@ class MetaStore
 
       FhgfsOpsErr moveRemoteFileBegin(DirInode& dir, EntryInfo* entryInfo, char* buf, size_t bufLen,
          size_t* outUsedBufLen);
-      void moveRemoteFileComplete(DirInode& dir, const std::string& entryID);
+      FhgfsOpsErr moveRemoteFileComplete(DirInode& dir, const std::string& entryID);
 
       FhgfsOpsErr getAllInodesIncremental(unsigned hashDirNum, int64_t lastOffset,
           unsigned maxOutInodes, FsckDirInodeList* outDirInodes, FsckFileInodeList* outFileInodes,
@@ -116,6 +118,10 @@ class MetaStore
 
       void invalidateMirroredDirInodes();
 
+
+
+      
+
    private:
       InodeDirStore dirStore;
 
@@ -130,7 +136,6 @@ class MetaStore
          mutliple dirStore locking dual-move methods */
 
       FhgfsOpsErr isFileUnlinkable(DirInode& subDir, EntryInfo* entryInfo);
-
       FhgfsOpsErr mkMetaFileUnlocked(DirInode& dir, const std::string& entryName,
          EntryInfo* entryInfo, FileInode* inode);
 

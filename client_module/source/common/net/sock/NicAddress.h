@@ -4,8 +4,6 @@
 #include <common/Common.h>
 #include <linux/if.h>
 
-#define NICADDRESS_IP_STR_LEN    16
-
 
 enum NicAddrType;
 typedef enum NicAddrType NicAddrType_t;
@@ -18,10 +16,9 @@ typedef struct NicListCapabilities NicListCapabilities;
 
 struct ib_device;
 
-extern bool NicAddress_preferenceComp(const NicAddress* lhs, const NicAddress* rhs);
+extern int NicAddress_preferenceComp(const NicAddress* lhs, const NicAddress* rhs);
 
 // inliners
-static inline void NicAddress_ipToStr(struct in_addr ipAddr, char* outStr);
 static inline bool NicAddress_equals(NicAddress* this, NicAddress* other);
 
 
@@ -34,7 +31,7 @@ enum NicAddrType
 
 struct NicAddress
 {
-   struct in_addr    ipAddr;
+   struct in6_addr ipAddr;
    NicAddrType_t     nicType;
    char              name[IFNAMSIZ];
 #ifdef BEEGFS_RDMA
@@ -48,21 +45,9 @@ struct NicListCapabilities
 };
 
 
-
-
-/**
- * @param outStr must be at least NICADDRESS_STR_LEN bytes long
- */
-void NicAddress_ipToStr(struct in_addr ipAddr, char* outStr)
-{
-   u8* ipArray = (u8*)&ipAddr.s_addr;
-
-   sprintf(outStr, "%u.%u.%u.%u", ipArray[0], ipArray[1], ipArray[2], ipArray[3]);
-}
-
 bool NicAddress_equals(NicAddress* this, NicAddress* other)
 {
-   return (this->ipAddr.s_addr == other->ipAddr.s_addr) &&
+   return ipv6_addr_equal(&this->ipAddr, &other->ipAddr) &&
       (this->nicType == other->nicType) &&
       !strncmp(this->name, other->name, IFNAMSIZ);
 }

@@ -1,4 +1,6 @@
 #include "IBVSocket.h"
+#include "common/Common.h"
+#include "common/net/sock/IpAddress.h"
 
 #ifdef BEEGFS_RDMA
 
@@ -68,7 +70,7 @@ typedef __typeof__(
    _bad_recv_wr;
 
 
-bool IBVSocket_init(IBVSocket* _this, struct in_addr srcIpAddr, NicAddressStats* nicStats)
+bool IBVSocket_init(IBVSocket* _this, int domain, struct in6_addr srcIpAddr, NicAddressStats* nicStats)
 {
    memset(_this, 0, sizeof(*_this) );
 
@@ -83,6 +85,8 @@ bool IBVSocket_init(IBVSocket* _this, struct in_addr srcIpAddr, NicAddressStats*
    _this->typeOfService = 0;
    _this->srcIpAddr = srcIpAddr;
    _this->nicStats = nicStats;
+   _this->sockDomain = domain;
+
 
    init_waitqueue_head(&_this->eventWaitQ);
 
@@ -158,12 +162,12 @@ bool __IBVSocket_createNewID(IBVSocket* _this)
    return true;
 }
 
-bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress, unsigned short port,
+bool IBVSocket_connectByIP(IBVSocket* _this, struct in6_addr ipaddress, unsigned short port,
    IBVCommConfig* commCfg)
 {
-   struct sockaddr_in sin;
-   struct sockaddr_in src;
-   struct sockaddr_in* srcp;
+   struct Beegfs_Sockaddr src = {0}, dst = {0};
+   struct sockaddr *saddr = NULL, *daddr = NULL;
+   int ssockDomain = AF_INET6, dsockDomain = AF_INET6;
    long connTimeoutJiffies = TimeTk_msToJiffiesSchedulable(IBVSOCKET_CONN_TIMEOUT_MS);
    Time connElapsed;
    int rc;
@@ -192,21 +196,42 @@ bool IBVSocket_connectByIP(IBVSocket* _this, struct in_addr ipaddress, unsigned 
       // resolve IP address ...
       // (async event handler also automatically resolves route on success)
 
-      sin.sin_addr.s_addr = ipaddress.s_addr;
-      sin.sin_family = AF_INET;
-      sin.sin_port = htons(port);
-
-      srcp = NULL;
-      if (_this->srcIpAddr.s_addr != 0)
+      /* note: the rdma_* library functions don't like IPv4 addresses mapped into IPv6. So we
+            translate both source and destination address into the appropriate sockaddr */
+      if (ipv6_addr_v4mapped(&ipaddress))
+         dsockDomain = AF_INET;
+      else
       {
-         src.sin_addr = _this->srcIpAddr;
-         src.sin_family = AF_INET;
-         src.sin_port = 0;
-         srcp = &src;
+         if (_this->sockDomain == AF_INET)
+         {
+            ibv_print_info_debug("IPv6 is disabled. Skipping NIC");
+            goto err_invalidateSock;
+         }
       }
 
-      if(rdma_resolve_addr(_this->cm_id, (struct sockaddr*)srcp, (struct sockaddr*)&sin,
-            _this->timeoutCfg.connectMS) )
+      if(!bsa_make(dsockDomain, ipaddress, port, &dst))
+         goto err_invalidateSock;
+      daddr = bsa_ptr(&dst);
+
+      if (ipv6_addr_v4mapped(&_this->srcIpAddr))
+         ssockDomain = AF_INET;
+      else
+      {
+         if (_this->sockDomain == AF_INET)
+         {
+            ibv_print_info_debug("IPv6 is disabled. Skipping NIC");
+            goto err_invalidateSock;
+         }
+      }
+
+      if (! ipv6_addr_equal(&_this->srcIpAddr, &in6addr_any))
+      {
+         if(!bsa_make(ssockDomain, _this->srcIpAddr, 0, &src))
+            goto err_invalidateSock;
+         saddr = bsa_ptr(&src);
+      }
+
+      if (rdma_resolve_addr(_this->cm_id, saddr, daddr, _this->timeoutCfg.connectMS))
       {
          ibv_print_info_debug("rdma_resolve_addr failed\n");
          goto err_invalidateSock;
@@ -315,15 +340,51 @@ err_invalidateSock:
 
 
 
-bool IBVSocket_bindToAddr(IBVSocket* _this, struct in_addr ipAddr, unsigned short port)
+bool IBVSocket_bindToAddr(IBVSocket* _this, struct in6_addr ipAddr, unsigned short port)
 {
-   struct sockaddr_in bindAddr;
+   int ipv6_supported;
+   int ret;
 
-   bindAddr.sin_family = AF_INET;
-   bindAddr.sin_addr = ipAddr;
-   bindAddr.sin_port = htons(port);
+   // We've had the kernel crashing when calling rdma_bind_addr() with an IPv6
+   // address while IPv6 is disabled.  So let's be extra careful here.  This is
+   // a brittle best-effort check and it might be slow.  I don't know how to do
+   // this better.
 
-   if(rdma_bind_addr(_this->cm_id, (struct sockaddr*)&bindAddr) )
+   {
+      struct socket *sock;
+      if (sock_create(PF_INET6, SOCK_DGRAM, 0, &sock) >= 0)
+      {
+         ipv6_supported = 1;
+         sock_release(sock);
+      }
+      else
+      {
+         ipv6_supported = 0;
+         printk_fhgfs_debug(KERN_DEBUG, "IBVSocket_bindToAddr: seems like IPv6 is disabled\n");
+      }
+   }
+
+   /* note: rdma_bind_addr will fail when trying to bind to an IPv4 address mapped to IPv6. So we
+         need to handle both separately and translate them into the appropriate sockaddr. */
+   if (ipv6_supported && !ipv6_addr_v4mapped(&ipAddr))
+   {
+      // IPv6 address
+      struct sockaddr_in6 bindAddr = beegfs_make_sockaddr_in6(ipAddr, port);
+      ret = rdma_bind_addr(_this->cm_id, beegfs_get_sockaddr(&bindAddr));
+   }
+   else if (ipv6_addr_v4mapped(&ipAddr))
+   {
+      // mapped IPv4 address
+      struct in_addr v4addr = {ipAddr.s6_addr32[3]};
+      struct sockaddr_in bindAddr = beegfs_make_sockaddr_in(v4addr, port);
+      ret = rdma_bind_addr(_this->cm_id, (struct sockaddr *) &bindAddr);
+   }
+   else
+   {
+      ret = -EINVAL;
+   }
+
+   if (ret != 0)
    {
       _this->errState = -1;
       return false;
@@ -817,10 +878,10 @@ void __IBVSocket_cleanupCommContext(struct rdma_cm_id* cm_id, IBVCommContext* co
    unsigned i;
    struct ib_device* dev;
 
-   ibv_print_info_debug("Free CommContext @ %p\n", commContext);
-
    if(!commContext)
       return;
+
+   ibv_print_info_debug("Free CommContext @ %p\n", commContext);
 
    dev = commContext->pd ? commContext->pd->device : NULL;
 
@@ -2076,11 +2137,6 @@ int IBVSocket_registerMr(IBVSocket* _this, struct ib_mr* mr, int access)
    }
 
    return 0;
-}
-
-struct in_addr IBVSocket_getSrcIpAddr(IBVSocket* _this)
-{
-   return _this->srcIpAddr;
 }
 
 

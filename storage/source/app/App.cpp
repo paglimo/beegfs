@@ -50,14 +50,13 @@ App::App(int argc, char** argv)
 
    this->cfg = NULL;
    this->storageTargets = NULL;
-   this->netFilter = NULL;
-   this->tcpOnlyFilter = NULL;
    this->log = NULL;
    this->mgmtNodes = NULL;
    this->metaNodes = NULL;
    this->storageNodes = NULL;
    this->targetMapper = NULL;
    this->mirrorBuddyGroupMapper = NULL;
+   this->metaMirrorBuddyGroupMapper = NULL;
    this->targetStateStore = NULL;
    this->ackStore = NULL;
    this->sessions = NULL;
@@ -84,6 +83,7 @@ App::App(int argc, char** argv)
 
    this->dlOpenHandleLibZfs = NULL;
    this->libZfsErrorReported = false;
+   this->chunkBalancerJob = NULL;
 }
 
 App::~App()
@@ -117,14 +117,14 @@ App::~App()
    SAFE_DELETE(this->mgmtNodes);
    this->localNode.reset();
    SAFE_DELETE(this->mirrorBuddyGroupMapper);
+   SAFE_DELETE(this->metaMirrorBuddyGroupMapper);
    SAFE_DELETE(this->targetMapper);
    SAFE_DELETE(this->targetStateStore);
    SAFE_DELETE(this->log);
-   SAFE_DELETE(this->tcpOnlyFilter);
-   SAFE_DELETE(this->netFilter);
    SAFE_DELETE(this->storageTargets);
    SAFE_DELETE(this->storageBenchOperator);
    SAFE_DELETE(this->chunkLockStore);
+   SAFE_DELETE(this->chunkBalancerJob);
 
    SAFE_DELETE(this->cfg);
 
@@ -287,6 +287,8 @@ void App::runNormal()
    // note: storage nodes & mappings must be downloaded before session restore (needed for mirrors)
    restoreSessions();
 
+   logInfos();
+
    // start component threads and join them
 
    startComponents();
@@ -342,6 +344,8 @@ void App::initDataObjects()
    this->targetMapper->attachStateStore(targetStateStore);
 
    this->metaNodes = new NodeStoreServers(NODETYPE_Meta, true);
+   this->metaMirrorBuddyGroupMapper = new MirrorBuddyGroupMapper();
+
 
    this->ackStore = new AcknowledgmentStore();
 
@@ -358,11 +362,9 @@ void App::initDataObjects()
 
 void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 {
-   Config* cfg = this->getConfig();
-
    if(cfg->getConnUseRDMA() && RDMASocket::rdmaDevicesExist() )
    {
-      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(outList);
+      bool foundRdmaInterfaces = NetworkInterfaceCard::checkAndAddRdmaCapability(this->allowedInterfaces, outList);
       if (foundRdmaInterfaces)
          outList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces}); // re-sort the niclist
    }
@@ -371,7 +373,7 @@ void App::findAllowedRDMAInterfaces(NicAddressList& outList) const
 void App::findAllowedInterfaces(NicAddressList& outList) const
 {
    // discover local NICs and filter them
-   NetworkInterfaceCard::findAllInterfaces(allowedInterfaces, outList);
+   NetworkInterfaceCard::findAll(&allowedInterfaces, false, cfg->getConnDisableIPv6(), &outList);
 
    if(outList.empty() )
       throw InvalidConfigException("Couldn't find any usable NIC");
@@ -386,13 +388,16 @@ void App::findAllowedInterfaces(NicAddressList& outList) const
  */
 void App::initBasicNetwork()
 {
+   // Detect ipv6
+   Socket::checkAndCacheIPv6Availability(cfg->getConnStoragePort(), cfg->getConnDisableIPv6());
+   
    // check if management host is defined
    if(!cfg->getSysMgmtdHost().length() )
       throw InvalidConfigException("Management host undefined");
 
    // prepare filter for outgoing packets/connections
-   this->netFilter = new NetFilter(cfg->getConnNetFilterFile() );
-   this->tcpOnlyFilter = new NetFilter(cfg->getConnTcpOnlyFilterFile() );
+   this->netFilter = loadNetworkList(cfg->getConnNetFilterFile());
+   this->tcpOnlyFilter = loadNetworkList(cfg->getConnTcpOnlyFilterFile());
 
    Config* cfg = this->getConfig();
 
@@ -406,7 +411,7 @@ void App::initBasicNetwork()
 
    findAllowedInterfaces(localNicList);
 
-   noDefaultRouteNets = std::make_shared<NetVector>();
+   noDefaultRouteNets = std::make_shared<NetFilter>();
    if(!initNoDefaultRouteList(noDefaultRouteNets.get()))
       throw InvalidConfigException("Failed to parse connNoDefaultRoute");
 
@@ -557,7 +562,7 @@ void App::initComponents()
    this->log->log(Log_DEBUG, "Initializing components...");
    NicAddressList nicList = getLocalNicList();
    this->dgramListener = new DatagramListener(
-      netFilter, nicList, ackStore, cfg->getConnStoragePort(),
+      &netFilter, nicList, ackStore, cfg->getConnStoragePort(),
       this->cfg->getConnRestrictOutboundInterfaces() );
    if(cfg->getTuneListenerPrioShift() )
       dgramListener->setPriorityShift(cfg->getTuneListenerPrioShift() );
@@ -616,6 +621,9 @@ void App::stopComponents()
 {
    // note: this method may not wait for termination of the components, because that could
    //    lead to a deadlock (when calling from signal handler)
+
+   if(chunkBalancerJob)
+      chunkBalancerJob->shutdown();
 
    workersStop();
 
@@ -877,16 +885,16 @@ void App::logInfos()
    logUsableNICs(log, nicList);
 
    // print net filters
-   if(netFilter->getNumFilterEntries() )
+   if(!netFilter.empty())
    {
       log->log(Log_WARNING, std::string("Net filters: ") +
-         StringTk::uintToStr(netFilter->getNumFilterEntries() ) );
+         StringTk::uintToStr(netFilter.size()));
    }
 
-   if(tcpOnlyFilter->getNumFilterEntries() )
+   if(!tcpOnlyFilter.empty())
    {
       this->log->log(Log_WARNING, std::string("TCP-only filters: ") +
-         StringTk::uintToStr(tcpOnlyFilter->getNumFilterEntries() ) );
+         StringTk::uintToStr(tcpOnlyFilter.size()));
    }
 
    // storage tragets
@@ -1007,7 +1015,7 @@ bool App::waitForMgmtNode()
    std::string mgmtdHost = cfg->getSysMgmtdHost();
    NicAddressList nicList = getLocalNicList();
 
-   RegistrationDatagramListener regDGramLis(netFilter, nicList, ackStore, udpListenPort,
+   RegistrationDatagramListener regDGramLis(&netFilter, nicList, ackStore, udpListenPort,
       this->cfg->getConnRestrictOutboundInterfaces() );
 
    regDGramLis.start();
@@ -1279,7 +1287,7 @@ bool App::registerAndDownloadMgmtInfo()
 
    // start temporary registration datagram listener
 
-   RegistrationDatagramListener regDGramLis(netFilter, nicList, ackStore, udpListenPort,
+   RegistrationDatagramListener regDGramLis(&netFilter, nicList, ackStore, udpListenPort,
       this->cfg->getConnRestrictOutboundInterfaces() );
 
    regDGramLis.start();
@@ -1301,7 +1309,8 @@ bool App::registerAndDownloadMgmtInfo()
       if(!InternodeSyncer::downloadAndSyncNodes() ||
          !InternodeSyncer::downloadAndSyncTargetMappings() ||
          !InternodeSyncer::downloadAndSyncStoragePools() ||
-         !InternodeSyncer::downloadAndSyncMirrorBuddyGroups() )
+         !InternodeSyncer::downloadAndSyncMirrorBuddyGroups() ||
+         !InternodeSyncer::downloadAndSyncMetaMirrorBuddyGroups() ) 
          continue;
 
       UInt16List targetIDs;

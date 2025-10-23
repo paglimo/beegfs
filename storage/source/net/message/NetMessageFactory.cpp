@@ -20,7 +20,7 @@
 #include <common/net/message/nodes/SetTargetConsistencyStatesRespMsg.h>
 #include <common/net/message/nodes/GetTargetConsistencyStatesRespMsg.h>
 #include <net/message/nodes/GenericDebugMsgEx.h>
-#include <net/message/nodes/GetClientStatsMsgEx.h>
+#include <net/message/nodes/GetClientStatsV2MsgEx.h>
 #include <net/message/nodes/HeartbeatMsgEx.h>
 #include <net/message/nodes/HeartbeatRequestMsgEx.h>
 #include <net/message/nodes/MapTargetsMsgEx.h>
@@ -85,13 +85,14 @@
 #include <net/message/nodes/StorageBenchControlMsgEx.h>
 
 // chunk balancing
-#include <common/net/message/storage/chunkbalancing/StripePatternUpdateRespMsg.h>
+#include <common/net/message/storage/chunkbalancing/UpdateStripePatternRespMsg.h>
 #include <common/net/message/storage/chunkbalancing/CpChunkPathsRespMsg.h>
 #include <net/message/storage/chunkbalancing/CpChunkPathsMsgEx.h>
 
 #include <common/net/message/SimpleMsg.h>
 #include <net/message/nodes/storagepools/RefreshStoragePoolsMsgEx.h>
 #include "NetMessageFactory.h"
+
 
 /**
  * @return NetMessage that must be deleted by the caller
@@ -117,7 +118,7 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       // nodes messages
       case NETMSGTYPE_ChangeTargetConsistencyStatesResp: { msg = new ChangeTargetConsistencyStatesRespMsg(); } break;
       case NETMSGTYPE_GenericDebug: { msg = new GenericDebugMsgEx(); } break;
-      case NETMSGTYPE_GetClientStats: { msg = new GetClientStatsMsgEx(); } break;
+      case NETMSGTYPE_GetClientStatsV2: { msg = new GetClientStatsV2MsgEx(); } break;
       case NETMSGTYPE_GetMirrorBuddyGroupsResp: { msg = new GetMirrorBuddyGroupsRespMsg(); } break;
       case NETMSGTYPE_GetNodesResp: { msg = new GetNodesRespMsg(); } break;
       case NETMSGTYPE_GetStatesAndBuddyGroupsResp: { msg = new GetStatesAndBuddyGroupsRespMsg(); } break;
@@ -166,11 +167,12 @@ std::unique_ptr<NetMessage> NetMessageFactory::createFromMsgType(unsigned short 
       case NETMSGTYPE_StatStoragePath: { msg = new StatStoragePathMsgEx(); } break;
       case NETMSGTYPE_StorageResyncStarted: { msg = new StorageResyncStartedMsgEx(); } break;
       case NETMSGTYPE_StorageResyncStartedResp: { msg = new StorageResyncStartedRespMsg(); } break;
-      case NETMSGTYPE_StripePatternUpdateResp: { msg = new StripePatternUpdateRespMsg(); } break;
+      case NETMSGTYPE_UpdateStripePatternResp: { msg = new UpdateStripePatternRespMsg(); } break;
       case NETMSGTYPE_TruncLocalFile: { msg = new TruncLocalFileMsgEx(); } break;
       case NETMSGTYPE_TruncLocalFileResp: { msg = new TruncLocalFileRespMsg(); } break;
       case NETMSGTYPE_UnlinkLocalFile: { msg = new UnlinkLocalFileMsgEx(); } break;
       case NETMSGTYPE_UnlinkLocalFileResp: { msg = new UnlinkLocalFileRespMsg(); } break;
+
 
       // session messages
       case NETMSGTYPE_CloseChunkFile: { msg = new CloseChunkFileMsgEx(); } break;

@@ -1,8 +1,9 @@
 #pragma once
 
-#include "common/app/log/Logger.h"
 #include <common/Common.h>
 #include <common/toolkit/serialization/Serialization.h>
+
+#include "IPAddress.h"
 
 #include <cstdint>
 #include <net/if.h>
@@ -13,6 +14,7 @@ enum NicAddrType {
    NICADDRTYPE_RDMA = 2
 };
 
+int findNicPosition(const StringList& preferences, const NicAddress& nic);
 
 /**
  * Returns true if a and b represent the same value.
@@ -43,94 +45,27 @@ class InAddrHash
 };
 
 /**
- * Create an in_addr from a uint32_t.
- */
-static inline struct in_addr in_addr_ctor(uint32_t a)
-{
-   struct in_addr r = {
-      .s_addr = a
-   };
-   return r;
-}
-
-class IPv4Network
-{
-public:
-   struct in_addr address;
-   struct in_addr netmask;
-   uint8_t prefix;
-
-   static struct in_addr generateNetmask(uint8_t prefix)
-   {
-      uint32_t res = static_cast<uint32_t>(-1);
-      if (prefix < 32)
-         res = ~(res >> prefix);
-      struct in_addr r = {
-         .s_addr = ::htonl(res)
-      };
-      return r;
-   };
-
-   /**
-    * @param address network address in network byte order.
-    * @param network prefix length, 0 - 32.
-    */
-   IPv4Network(struct in_addr address, uint8_t prefix)
-   {
-      netmask = generateNetmask(prefix);
-      this->address.s_addr= address.s_addr & netmask.s_addr;
-      this->prefix = prefix;
-   }
-
-   IPv4Network()
-      : IPv4Network(in_addr_ctor(0), 0) {}
-
-   /**
-    * Parse CIDR and populate net with
-    * data in network byte order.
-    * @param cidr network address in CIDR format (e.g. 10.10.0.0/16)
-    * @param net instance to populate
-    * @return true if parsing was successful
-    */
-   static bool parse(const std::string& cidr, IPv4Network& net);
-
-   /**
-    * Indicate if passed addr is in the network described by
-    * this instance.
-    * @param addr address to test
-    * @return true if addr is in this subnet
-    */
-   bool matches(struct in_addr addr) const
-   {
-      return (addr.s_addr & netmask.s_addr) == address.s_addr;
-   }
-
-   bool operator==(const IPv4Network& o) const
-   {
-      return address == o.address && prefix == o.prefix && netmask == o.netmask;
-   }
-};
-
-typedef std::vector<IPv4Network> NetVector;
-
-/**
  * Note: Make sure this struct can be copied with the assignment operator.
  */
 struct NicAddress
 {
-   struct in_addr ipAddr;
-   NicAddrType    nicType;
-   char           name[IFNAMSIZ];
-   uint8_t        protocol;
+   IPAddress      ipAddr;
+   NicAddrType    nicType = NicAddrType::NICADDRTYPE_STANDARD;
+   char           name[IFNAMSIZ] = "";
+   uint8_t        protocol = 4;
 
    static void serialize(const NicAddress* obj, Serializer& ser)
    {
-      // We currently only support and store ipv4 addresses internally, so we always set the
-      // protocol field to 4.
-      uint8_t protocol = 4;
-      ser % protocol;
+      ser % obj->protocol;
 
-      ser.putBlock(&obj->ipAddr.s_addr, sizeof(obj->ipAddr.s_addr) );
+      if (obj->protocol == 4) {
+         in_addr_t ipv4 = obj->ipAddr.toIPv4InAddrT();
+         ser.putBlock(&ipv4, sizeof(ipv4));
+      } else {
+         auto ipv6 = obj->ipAddr.data();
+         ser.putBlock(&ipv6, sizeof(ipv6));
+      }
+
       ser.putBlock(obj->name, BEEGFS_MIN(sizeof(obj->name), SERIALIZATION_NICLISTELEM_NAME_SIZE) );
       ser % serdes::as<char>(obj->nicType);
       ser.skip(2); // PADDING
@@ -141,28 +76,28 @@ struct NicAddress
       static const unsigned minNameSize =
          BEEGFS_MIN(sizeof(obj->name), SERIALIZATION_NICLISTELEM_NAME_SIZE);
 
-      ::memset(obj, 0, sizeof(*obj) );
-
       des % obj->protocol;
       if (obj->protocol == 4) {
          // Ipv4 address
-         des.getBlock(&obj->ipAddr.s_addr, sizeof(obj->ipAddr.s_addr));
+         in_addr_t ipv4 {0};
+         des.getBlock(&ipv4, sizeof(ipv4));
+         obj->ipAddr = IPAddress(ipv4);
       } else {
-         // If this is an ipv6 address, skip it as it is not supported yet. The receiver of this
-         // nic must check the protocol afterwards and discard it if it is not ipv4. For the usual
-         // list deserialization it is handled by the deserializaer specialization below.
-         des.skip(16);
+         std::array<uint8_t, 16> ipv6 {0};
+         des.getBlock(ipv6.data(), sizeof(ipv6));
+         obj->ipAddr = IPAddress(ipv6);
       }
 
       des.getBlock(obj->name, minNameSize);
       obj->name[minNameSize - 1] = 0;
+
       des % serdes::as<char>(obj->nicType);
       des.skip(2); // PADDING
    }
 
    bool operator==(const NicAddress& o) const
    {
-      return ipAddr.s_addr == o.ipAddr.s_addr && nicType == o.nicType
+      return ipAddr == o.ipAddr && nicType == o.nicType
          && !strncmp(name, o.name, sizeof(name));
    }
 };
@@ -173,7 +108,11 @@ typedef struct NicListCapabilities
 } NicListCapabilities;
 
 
-typedef std::list<NicAddress> NicAddressList;
+class NicAddressList : public std::list<NicAddress>
+{
+
+};
+
 typedef NicAddressList::iterator NicAddressListIter;
 
 // Specialization of NicAddressList serializer, forwarding to the generic list serializer
@@ -201,10 +140,6 @@ struct BackedNicAddressListDes {
          NicAddress nic;
 
          des % nic;
-         if (nic.protocol != 4) {
-            LOG(GENERAL, WARNING, "Skipping incoming Ipv6 interface ", nic.name);
-            continue;
-         }
 
          value.backing.push_back(nic);
       }
@@ -224,23 +159,21 @@ inline BackedNicAddressListDes serdesNicAddressList(NicAddressList*& ptr, NicAdd
 static inline std::string NicAddressList_str(const NicAddressList& nicList)
 {
    std::string r;
-   char buf[64];
+   char buf[128];
    for (NicAddressList::const_iterator it = nicList.begin(); it != nicList.end(); ++it)
    {
-      snprintf(buf, sizeof(buf), "name=%s type=%d addr=%x, ", it->name, it->nicType, it->ipAddr.s_addr);
+      snprintf(buf, sizeof(buf), "name=%s type=%d addr=%s, ", it->name, it->nicType, it->ipAddr.toString().c_str());
       r += std::string(buf);
    }
    return r;
 }
 
+int findNicPosition(const StringList& preferences, const NicAddress& nic);
+
 class NetworkInterfaceCard
 {
    public:
-      static bool findAll(StringList* allowedInterfacesList, bool useRDMA,
-         NicAddressList* outList);
-      static bool findAllInterfaces(const StringList& allowedInterfacesList,
-         NicAddressList& outList);
-      static bool findByName(const char* interfaceName, NicAddress* outAddr);
+      static bool findAll(const StringList* allowedInterfacesList, bool useRDMA, bool disableIPv6, NicAddressList* outList);
 
       static const char* nicTypeToString(NicAddrType nicType);
       static std::string nicAddrToString(NicAddress* nicAddr);
@@ -249,51 +182,21 @@ class NetworkInterfaceCard
       static void supportedCapabilities(NicAddressList* nicList,
          NicListCapabilities* outCapabilities);
 
-      static bool checkAndAddRdmaCapability(NicAddressList& nicList);
+      static bool checkAndAddRdmaCapability(const StringList& allowedInterfacesList, NicAddressList& nicList);
+
+      struct NicAddrComp {
+         const StringList* preferences = nullptr;
+         explicit NicAddrComp(const StringList* preferences = nullptr) : preferences(preferences) {}
+         bool operator()(const NicAddress& lhs, const NicAddress& rhs) const;
+      };
 
    private:
       NetworkInterfaceCard() {}
 
-      static bool fillNicAddress(int sock, NicAddrType nicType, struct ifreq* ifr,
+      static bool fillNicAddress(NicAddrType nicType, struct ifaddrs* ifa,
          NicAddress* outAddr);
-      static bool findAllBySocketDomain(int domain, NicAddrType nicType,
-         const StringList* allowedInterfacesList, NicAddressList* outList);
-      static void filterInterfacesForRDMA(NicAddressList* list, NicAddressList* outList);
-
-
-   public:
-      struct NicAddrComp {
-         // the comparison implemented here is a model of Compare only if preferences contains
-         // all possible names ever encountered or is unset.
-         const StringList* preferences = nullptr;
-
-         explicit NicAddrComp(const StringList* preferences = nullptr): preferences(preferences) {}
-
-         bool operator()(const NicAddress& lhs, const NicAddress& rhs) const
-         {
-            // compares the preference of NICs
-            // returns true if lhs is preferred compared to rhs
-            if (preferences) {
-               for (const auto& p : *preferences) {
-                  if (p == lhs.name)
-                     return true;
-                  if (p == rhs.name)
-                     return false;
-               }
-            }
-
-            // prefer RDMA NICs
-            if( (lhs.nicType == NICADDRTYPE_RDMA) && (rhs.nicType != NICADDRTYPE_RDMA) )
-               return true;
-            if( (rhs.nicType == NICADDRTYPE_RDMA) && (lhs.nicType != NICADDRTYPE_RDMA) )
-               return false;
-
-            // prefer higher ipAddr
-            unsigned lhsHostOrderIP = ntohl(lhs.ipAddr.s_addr);
-            unsigned rhsHostOrderIP = ntohl(rhs.ipAddr.s_addr);
-
-            // this is the original IP-order version
-            return lhsHostOrderIP > rhsHostOrderIP;
-         }
-      };
+      static bool findAllInterfaces(NicAddrType nicType,
+         const StringList* allowedInterfacesList, bool disableIPv6, NicAddressList* outList);
+      static void filterInterfacesForRDMA(const StringList& allowedInterfacesList, NicAddressList* list,
+         NicAddressList* outList);
 };

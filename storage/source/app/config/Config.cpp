@@ -53,6 +53,7 @@ void Config::loadDefaults(bool addDashes)
    configMapRedefine("tuneNumResyncGatherSlaves",     "6");
    configMapRedefine("tuneUseAggressiveStreamPoll",   "false");
    configMapRedefine("tuneUsePerTargetWorkers",       "true");
+   configMapRedefine("tuneChunkBalanceQueueLimit",    "100000");
 
    configMapRedefine("quotaEnableEnforcement",        "false");
    configMapRedefine("quotaDisableZfsSupport",        "false");
@@ -174,6 +175,8 @@ void Config::applyConfigMap(bool enableException, bool addDashes)
          tuneUseAggressiveStreamPoll = StringTk::strToBool(iter->second);
       else if (iter->first == std::string("tuneUsePerTargetWorkers"))
          tuneUsePerTargetWorkers = StringTk::strToBool(iter->second);
+      else if(iter->first == std::string("tuneChunkBalanceQueueLimit"))
+         tuneChunkBalanceQueueLimit = StringTk::strToUInt(iter->second);
       else if (iter->first == std::string("quotaEnableEnforcement"))
          quotaEnableEnforcement = StringTk::strToBool(iter->second);
       else if (iter->first == std::string("quotaDisableZfsSupport"))

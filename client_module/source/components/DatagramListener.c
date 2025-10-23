@@ -28,7 +28,7 @@ void __DatagramListener_listenLoop(DatagramListener* this)
 
    Thread* thisThread = (Thread*)this;
 
-   fhgfs_sockaddr_in fromAddr;
+   struct sockaddr_in6 fromAddr;
    const int recvTimeoutMS = 2000;
 
    while(!Thread_getSelfTerminate(thisThread) )
@@ -46,12 +46,11 @@ void __DatagramListener_listenLoop(DatagramListener* this)
       else
       if(recvRes == 0)
       {
-         char* fromIP = SocketTk_ipaddrToStr(fromAddr.addr);
+         char fromIp[SOCKET_IPADDRSTR_LEN];
+         SocketTk_ipaddrToStr(fromIp, sizeof fromIp, fromAddr.sin6_addr);
          Logger_logFormatted(log, Log_NOTICE, logContext,
             "Received an empty datagram. IP: %s; port: %d",
-            fromIP, fromAddr.port);
-         kfree(fromIP);
-
+            fromIp, beegfs_get_port(&fromAddr));
          continue;
       }
       else
@@ -77,11 +76,10 @@ void __DatagramListener_listenLoop(DatagramListener* this)
             || msg->msgHeader.msgSequence != 0
             || msg->msgHeader.msgSequenceDone != 0)
       {
-         char* ipStr = SocketTk_ipaddrToStr(fromAddr.addr);
-
+         char ipStr[SOCKET_IPADDRSTR_LEN];
+         SocketTk_ipaddrToStr(ipStr, sizeof ipStr, fromAddr.sin6_addr);
          Logger_logFormatted(this->app->logger, Log_NOTICE, logContext,
                "Received invalid message from peer %s", ipStr);
-         kfree(ipStr);
       }
       else
       {
@@ -94,7 +92,7 @@ void __DatagramListener_listenLoop(DatagramListener* this)
 }
 
 void _DatagramListener_handleIncomingMsg(DatagramListener* this,
-   fhgfs_sockaddr_in* fromAddr, NetMessage* msg)
+   struct sockaddr_in6* fromAddr, NetMessage* msg)
 {
    Logger* log = App_getLogger(this->app);
    const char* logContext = "DatagramListener (incoming msg)";
@@ -131,17 +129,18 @@ void _DatagramListener_handleIncomingMsg(DatagramListener* this,
 
       default:
       { // valid fhgfs message, but not allowed within this context
-         char* ipStr = SocketTk_ipaddrToStr(fromAddr->addr);
+         char ipStr[SOCKET_IPADDRSTR_LEN];
+         SocketTk_ipaddrToStr(ipStr, sizeof ipStr, fromAddr->sin6_addr);
          Logger_logErrFormatted(log, logContext, "Received a message of type %d "
             "that is invalid within the current context from: %s",
             NetMessage_getMsgType(msg), ipStr);
-         kfree(ipStr);
       } break;
    };
 }
 
 bool __DatagramListener_initSock(DatagramListener* this, unsigned short udpPort)
 {
+   App *app = this->app;
    Config* cfg = App_getConfig(this->app);
    Logger* log = App_getLogger(this->app);
    const char* logContext = "DatagramListener (init sock)";
@@ -151,9 +150,8 @@ bool __DatagramListener_initSock(DatagramListener* this, unsigned short udpPort)
    Socket* udpSockBase;
    int bufsize;
 
-   this->udpPortNetByteOrder = htons(udpPort);
-
-   this->udpSock = StandardSocket_constructUDP();
+   this->udpPort = udpPort;
+   this->udpSock = StandardSocket_construct(app->sockDomain, SOCK_DGRAM, 0);
 
    if(!this->udpSock)
    {
@@ -248,20 +246,24 @@ void DatagramListener_sendMsgToNode(DatagramListener* this, Node* node, NetMessa
 }
 
 bool __DatagramListener_isDGramFromLocalhost(DatagramListener* this,
-   fhgfs_sockaddr_in* fromAddr)
+   struct sockaddr_in6* fromAddr)
 {
    NodeConnPool* connPool;
    NicAddressList* nicList;
    NicAddressListIter iter;
+   struct in6_addr fromIp;
    int nicListSize;
    int i;
    bool result = false;
 
-   if(fromAddr->port != this->udpPortNetByteOrder)
+   if (beegfs_get_port(fromAddr) != this->udpPort)
       return false;
 
-   // (inaddr_loopback is in host byte order)
-   if(ntohl(INADDR_LOOPBACK) == fromAddr->addr.s_addr)
+   fromIp = fromAddr->sin6_addr;
+
+   if (ipv6_addr_v4mapped(&fromIp) && fromIp.s6_addr32[3] == htonl(INADDR_LOOPBACK))
+      return true;
+   if (ipv6_addr_equal(&fromIp, &in6addr_loopback))
       return true;
 
    connPool = Node_getConnPool(this->localNode);
@@ -275,7 +277,7 @@ bool __DatagramListener_isDGramFromLocalhost(DatagramListener* this,
    {
       NicAddress* nicAddr = NicAddressListIter_value(&iter);
 
-      if(nicAddr->ipAddr.s_addr == fromAddr->addr.s_addr)
+      if (ipv6_addr_equal(&nicAddr->ipAddr, &fromIp))
       {
          result = true;
          break;

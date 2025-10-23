@@ -1,5 +1,6 @@
 #pragma once
 
+#include "common/net/sock/IPAddress.h"
 #include <app/config/Config.h>
 #include <common/Common.h>
 #include <common/app/log/LogContext.h>
@@ -20,17 +21,18 @@
 #include <common/nodes/TargetStateStore.h>
 #include <common/storage/quota/ExceededQuotaPerTarget.h>
 #include <common/toolkit/AcknowledgmentStore.h>
-#include <common/toolkit/NetFilter.h>
 #include <components/DatagramListener.h>
 #include <components/FileEventLogger.h>
 #include <components/InternodeSyncer.h>
 #include <components/buddyresyncer/BuddyResyncer.h>
+#include <components/chunkbalancer/ChunkBalancerJob.h>
 #include <net/message/NetMessageFactory.h>
 #include <nodes/MetaNodeOpStats.h>
 #include <session/SessionStore.h>
 #include <storage/DirInode.h>
 #include <storage/MetaStore.h>
 #include <storage/SyncedDiskAccessPath.h>
+#include <vector>
 
 
 
@@ -70,6 +72,7 @@ class App : public AbstractApp
       virtual void handleNetworkInterfaceFailure(const std::string& devname) override;
 
       void handleNetworkInterfacesChanged(NicAddressList nicList);
+      Mutex ChunkBalanceJobMutex;
 
 
    private:
@@ -84,8 +87,8 @@ class App : public AbstractApp
       LockFD pidFileLockFD;
       LockFD workingDirLockFD;
 
-      NetFilter* netFilter; // empty filter means "all nets allowed"
-      NetFilter* tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
+      NetFilter netFilter; // empty filter means "all nets allowed"
+      NetFilter tcpOnlyFilter; // for IPs that allow only plain TCP (no RDMA etc)
       std::shared_ptr<Node> localNode;
 
       NodeStoreServers* mgmtNodes;
@@ -141,7 +144,8 @@ class App : public AbstractApp
       WorkerList commSlaveList; // used by workers for parallel comm tasks
 
       BuddyResyncer* buddyResyncer;
-
+      ChunkBalancerJob* chunkBalancerJob;
+      
       ExceededQuotaPerTarget exceededQuotaStores;
 
       std::unique_ptr<FileEventLogger, decltype(&destroyFileEventLogger)> fileEventLogger { nullptr, &destroyFileEventLogger };
@@ -270,14 +274,14 @@ class App : public AbstractApp
          return cfg;
       }
 
-      virtual const NetFilter* getNetFilter() const override
+      const NetFilter* getNetFilter() const override
       {
-         return netFilter;
+         return &netFilter;
       }
 
-      virtual const NetFilter* getTcpOnlyFilter() const override
+      const NetFilter* getTcpOnlyFilter() const override
       {
-         return tcpOnlyFilter;
+         return &tcpOnlyFilter;
       }
 
       virtual const AbstractNetMessageFactory* getNetMessageFactory() const override
@@ -479,6 +483,24 @@ class App : public AbstractApp
       BuddyResyncer* getBuddyResyncer()
       {
          return this->buddyResyncer;
+      }
+
+      ChunkBalancerJob* getChunkBalancerJob() 
+      {
+         return chunkBalancerJob;
+      }
+
+      void setChunkBalancerJob(ChunkBalancerJob* chunkBalancerJobPtr) 
+      {
+         chunkBalancerJob=chunkBalancerJobPtr;
+      }
+
+      //should be called ONLY by the ChunkBalancerJob itself using selfShutdown()
+      void cleanupChunkBalancerJob()
+      {
+         chunkBalancerJob->join();
+         SAFE_DELETE(chunkBalancerJob); 
+         chunkBalancerJob = NULL;
       }
 
       int getAppResult() const

@@ -66,6 +66,9 @@ void App::runNormal()
    initWorkers();
    initComponents();
 
+   // Detect ipv6
+   Socket::checkAndCacheIPv6Availability(cfg->getConnMonPort(), cfg->getConnDisableIPv6());
+
    RDMASocket::rdmaForkInitOnce();
 
 
@@ -86,15 +89,12 @@ void App::runNormal()
 
 void App::initLocalNodeInfo()
 {
-   bool useRDMA = cfg->getConnUseRDMA();
-   unsigned portUDP = cfg->getConnMonPort();
-
    StringList allowedInterfaces;
    std::string interfacesFilename = cfg->getConnInterfacesFile();
    if (interfacesFilename.length() )
       cfg->loadStringListFile(interfacesFilename.c_str(), allowedInterfaces);
 
-   NetworkInterfaceCard::findAll(&allowedInterfaces, useRDMA, &localNicList);
+   NetworkInterfaceCard::findAll(&allowedInterfaces, cfg->getConnUseRDMA(), cfg->getConnDisableIPv6(), &localNicList);
 
    if (localNicList.empty() )
       throw InvalidConfigException("Couldn't find any usable NIC");
@@ -102,7 +102,7 @@ void App::initLocalNodeInfo()
    localNicList.sort(NetworkInterfaceCard::NicAddrComp{&allowedInterfaces});
    NetworkInterfaceCard::supportedCapabilities(&localNicList, &localNicCaps);
 
-   noDefaultRouteNets = std::make_shared<NetVector>();
+   noDefaultRouteNets = std::make_shared<NetFilter>();
    if(!initNoDefaultRouteList(noDefaultRouteNets.get()))
       throw InvalidConfigException("Failed to parse connNoDefaultRoute");
 
@@ -112,13 +112,16 @@ void App::initLocalNodeInfo()
    std::string nodeID = System::getHostname();
 
    // TODO add a Mon nodetype at some point
-   localNode = std::make_shared<LocalNode>(NODETYPE_Client, nodeID, NumNodeID(1), portUDP, 0, localNicList);
+   localNode = std::make_shared<LocalNode>(NODETYPE_Client, nodeID, NumNodeID(1), cfg->getConnMonPort(),
+      0, localNicList);
 }
 
 void App::initDataObjects()
 {
-   netFilter = boost::make_unique<NetFilter>(cfg->getConnNetFilterFile());
-   tcpOnlyFilter = boost::make_unique<NetFilter>(cfg->getConnTcpOnlyFilterFile());
+   // prepare filter for outgoing packets/connections
+   this->netFilter = loadNetworkList(cfg->getConnNetFilterFile());
+   this->tcpOnlyFilter = loadNetworkList(cfg->getConnTcpOnlyFilterFile());
+
    netMessageFactory = boost::make_unique<NetMessageFactory>();
    workQueue = boost::make_unique<MultiWorkQueue>();
 
@@ -278,16 +281,16 @@ void App::logInfos()
    logUsableNICs(NULL, nicList);
 
    // print net filters
-   if (netFilter->getNumFilterEntries() )
+   if(!netFilter.empty())
    {
       LOG(GENERAL, WARNING, std::string("Net filters: ")
-            + StringTk::uintToStr(netFilter->getNumFilterEntries() ) );
+         + StringTk::uintToStr(netFilter.size()));
    }
 
-   if (tcpOnlyFilter->getNumFilterEntries() )
+   if(!tcpOnlyFilter.empty())
    {
       LOG(GENERAL, WARNING, std::string("TCP-only filters: ")
-            + StringTk::uintToStr(tcpOnlyFilter->getNumFilterEntries() ) );
+         + StringTk::uintToStr(tcpOnlyFilter.size()));
    }
 }
 

@@ -93,7 +93,7 @@ bool ConnAcceptor::initSocks()
    // TCP
    try
    {
-      tcpListenSock = new StandardSocket(PF_INET, SOCK_STREAM);
+      tcpListenSock = new StandardSocket(SOCK_STREAM);
       tcpListenSock->setSoReuseAddr(true);
       int bufsize = cfg->getConnTCPRcvBufSize();
       if (bufsize > 0)
@@ -252,11 +252,11 @@ void ConnAcceptor::onIncomingStandardConnection(StandardSocket* sock)
 {
    try
    {
-      struct sockaddr_in peerAddr;
+      struct sockaddr_storage peerAddr;
       socklen_t peerAddrLen = sizeof(peerAddr);
 
       StandardSocket* acceptedSock =
-         (StandardSocket*)sock->accept( (struct sockaddr*)&peerAddr, &peerAddrLen);
+         reinterpret_cast<StandardSocket*>(sock->accept(&peerAddr, &peerAddrLen));
 
       // (note: level Log_DEBUG to avoid spamming the log until we have log topics)
       log.log(Log_DEBUG, std::string("Accepted new connection from ") +
@@ -301,12 +301,12 @@ void ConnAcceptor::onIncomingRDMAConnection(RDMASocket* sock)
    {
       try
       {
-         struct sockaddr_in peerAddr;
+         struct sockaddr_storage peerAddr;
          socklen_t peerAddrLen = sizeof(peerAddr);
 
          sock->setConnectionRejectionRate(cfg->getConnectionRejectionRate());
          RDMASocket* acceptedSock =
-            (RDMASocket*)sock->accept( (struct sockaddr*)&peerAddr, &peerAddrLen);
+            reinterpret_cast<RDMASocket*>(sock->accept(&peerAddr, &peerAddrLen));
 
          // note: RDMASocket::accept() might return NULL (which is not an error)
          if(!acceptedSock)

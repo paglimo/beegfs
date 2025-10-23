@@ -13,17 +13,21 @@ class GetClientStatsMsg : public SimpleInt64Msg
 {
    public:
       /**
-       * @param cookieIP  - Not all clients fit into the last stats message. So we use this IP
-       *                    as a cookie to know where to continue (IP + 1)
+       * @param cookie  - Not all clients fit into the last stats message. So we use this value
+       *                  as a cookie to know where to continue (cookie + 1). cookie may be
+       *                  a binary IP address in host-order or a UID. -1 is used as the "start"
+       *                  cookie.
        *
        *  This constructor is called on the side sending the mesage.
        */
-      GetClientStatsMsg(int64_t cookieIP) : SimpleInt64Msg(NETMSGTYPE_GetClientStats, cookieIP)
+      // XXX cookieIP needs to be uint128_t. How to do this with backward compatibility?
+      GetClientStatsMsg(int64_t cookie) : SimpleInt64Msg(NETMSGTYPE_GetClientStats, cookie)
       {
+         //std::cout << "cookieIP: " << StringTk::uint64ToHexStr(cookie) << std::endl;
       }
 
       /**
-       * For dersialization only.
+       * For deserialization only.
        */
       GetClientStatsMsg() : SimpleInt64Msg(NETMSGTYPE_GetClientStats)
       {

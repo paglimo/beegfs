@@ -26,7 +26,7 @@ class ResyncLocalFileMsg : public NetMessageSerdes<ResyncLocalFileMsg>
    public:
       /*
        * @param dataBuf the actual data to be written;may be NULL if RESYNCLOCALFILEMSG_FLAG_NODATA
-       * @param relativePathStr path to chunk, relative to buddy mirror directory
+       * @param relativePathStr string path to chunk to be resynced, depending on if RESYNCLOCALFILEMSG_FLAG_MIRROR is set, the path will be relative either to the "buddymir" or "chunks" directory 
        * @param resyncToTargetID
        * @param offset
        * @param count amount of data to write from dataBuf
@@ -76,6 +76,7 @@ class ResyncLocalFileMsg : public NetMessageSerdes<ResyncLocalFileMsg>
       unsigned getSupportedHeaderFeatureFlagsMask() const
       {
          return RESYNCLOCALFILEMSG_FLAG_SETATTRIBS | RESYNCLOCALFILEMSG_FLAG_NODATA |
+
             RESYNCLOCALFILEMSG_FLAG_TRUNC | RESYNCLOCALFILEMSG_CHECK_SPARSE | RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR | RESYNCLOCALFILEMSG_FLAG_BUDDYMIRROR_SECOND | 
             RESYNCLOCALFILEMSG_FLAG_CHUNKBALANCE_BUDDYMIRROR;
       }

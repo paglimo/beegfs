@@ -4,140 +4,210 @@
 #include <common/toolkit/StringTk.h>
 #include <common/app/log/LogContext.h>
 #include <common/system/System.h>
-#include "Socket.h"
 #include "RDMASocket.h"
+#include <memory>
+#include <string_view>
 #include <sys/ioctl.h>
+#include <sys/socket.h>
 #include <sys/types.h>
 #include <net/if_arp.h>
 #include <arpa/inet.h>
+#include <ifaddrs.h>
 
 #define IFRSIZE(numIfcReqs)      ((int)((numIfcReqs) * sizeof(struct ifreq) ) )
 
+// Finds the position in the nic preference list (e.g. connInterfacesList), returns -1 if not found
+// or blacklisted
+int findNicPosition(const StringList& preferences, const NicAddress& nic) {
+   auto matches = [&](unsigned col, const std::string& value) -> bool {
+      switch(col) {
+         case 0:
+            // Special case of interface being named "*", needs to be escaped: `\*`
+            if(value == "\\*" && std::string_view("*") == nic.name)
+               return true;
+            // Special case of interface being named "!", needs to be escaped: `\!`
+            if(value == "\\!" && std::string_view("!") == nic.name)
+               return true;
+            return value == "*" || value == nic.name;
+
+         case 1:
+            return value == "*" || value == nic.ipAddr.toString();
+
+         case 2:
+            if(value == "*")
+               return true;
+            else if(nic.ipAddr.isIPv6() && value == "6")
+               return true;
+            else if (nic.ipAddr.isIPv4() && value == "4")
+               return true;
+            else
+               return false;
+
+         case 3:
+            if(value == "*")
+               return true;
+            else if(nic.nicType == NICADDRTYPE_RDMA && value == "rdma")
+               return true;
+            else if (nic.nicType == NICADDRTYPE_STANDARD && value == "tcp")
+               return true;
+            else
+               return false;
+         default:
+            // Any potential extra arguments are ignored if '*' but fail on anything else
+            return value == "*";
+      }
+   };
+
+   std::vector<std::string> split;
+   int pos = -1;
+
+   for (const auto& row : preferences) {
+      pos++;
+
+      split.clear();
+      StringTk::explode(row, ' ', &split);
+
+      bool match = true;
+      // First parameter being '!' means anything that matches the row is blacklisted
+      if(split[0] == "!") {
+         for(unsigned col = 1; col < split.size(); col++) {
+            if(!matches(col - 1, split[col])) {
+               match = false;
+               break;
+            }
+         }
+         if(match)
+            return -1;
+      // Otherwise, anything that matches the row is whitelisted and put into that position
+      } else {
+         for(unsigned col = 0; col < split.size(); col++) {
+            if(!matches(col, split[col])) {
+               match = false;
+               break;
+            }
+         }
+         if(match)
+            return pos;
+      }
+   }
+
+   return -1;
+}
 
 /**
- * find all network interfaces and check if they are capable of doing RDMA
+ * find all network interfaces.
  *
+ * @param useRDMA - if true, check for RDMA devices
+ * @param outList - receiver of IP addresses
  * @return true if any usable standard interface was found
  */
-bool NetworkInterfaceCard::findAll(StringList* allowedInterfacesList, bool useRDMA,
+bool NetworkInterfaceCard::findAll(const StringList* allowedInterfacesList, bool useRDMA, bool disableIPv6,
    NicAddressList* outList)
 {
    bool retVal = false;
 
-   // find standard TCP/IP interfaces
-   if(findAllBySocketDomain(PF_INET, NICADDRTYPE_STANDARD, allowedInterfacesList, outList) )
-      retVal = true;
+   // find standard IP interfaces
+   retVal = findAllInterfaces(NICADDRTYPE_STANDARD, allowedInterfacesList, disableIPv6, outList);
 
-   // find RDMA interfaces (based on TCP/IP interfaces query results)
-   if(useRDMA && RDMASocket::rdmaDevicesExist() )
+   // find RDMA interfaces (based on IP interfaces query results)
+   if(retVal && useRDMA && RDMASocket::rdmaDevicesExist() )
    {
-      NicAddressList tcpInterfaces;
-
-      findAllBySocketDomain(PF_INET, NICADDRTYPE_STANDARD, allowedInterfacesList, &tcpInterfaces);
-
-      filterInterfacesForRDMA(&tcpInterfaces, outList);
+      NicAddressList tcpInterfaces(*outList);
+      filterInterfacesForRDMA(*allowedInterfacesList, &tcpInterfaces, outList);
    }
 
    return retVal;
 }
 
-/**
- * find all network interfaces. This differs from findAll because here only the interfaces are
- * (TCP) are detected. No check for there RDMA capability is performed.
- *
- * @return true if any usable standard interface was found
- */
-bool NetworkInterfaceCard::findAllInterfaces(const StringList& allowedInterfacesList,
-   NicAddressList& outList)
+bool NetworkInterfaceCard::findAllInterfaces(NicAddrType nicType,
+   const StringList* allowedInterfacesList, bool disableIPv6, NicAddressList* outList)
 {
-   bool retVal = false;
 
-   // find standard TCP/IP interfaces
-   if(findAllBySocketDomain(PF_INET, NICADDRTYPE_STANDARD, &allowedInterfacesList, &outList) )
-      retVal = true;
+   std::unique_ptr<ifaddrs, void(*)(ifaddrs* p)>
+      ifaddrs(nullptr, [](struct ifaddrs* p) {freeifaddrs(p);});
 
-   return retVal;
-}
-
-bool NetworkInterfaceCard::findAllBySocketDomain(int domain, NicAddrType nicType,
-   const StringList* allowedInterfacesList, NicAddressList* outList)
-{
-   int sock = socket(domain, SOCK_STREAM, 0);
-   if(sock == -1)
-      return false;
-
-
-   int numIfcReqs = 1; // number of interfaces that can be stored in the current buffer (can grow)
-
-   struct ifconf ifc;
-   ifc.ifc_len = IFRSIZE(numIfcReqs);
-   ifc.ifc_req = NULL;
-
-   // enlarge the buffer to store all existing interfaces
-   do
    {
-      numIfcReqs++; // grow bufferspace to one more interface
-      SAFE_FREE(ifc.ifc_req); // free previous allocation (if any)
-
-      // alloc buffer for interfaces query
-      ifc.ifc_req = (ifreq*)malloc(IFRSIZE(numIfcReqs) );
-      if(!ifc.ifc_req)
-      {
-         LogContext("NIC query").logErr("Out of memory");
-         close(sock);
-
-         return false;
-      }
-
-      ifc.ifc_len = IFRSIZE(numIfcReqs);
-
-      if(ioctl(sock, SIOCGIFCONF, &ifc) )
+      struct ifaddrs* p = nullptr;
+      if (getifaddrs(&p))
       {
          LogContext("NIC query").logErr(
-            std::string("ioctl SIOCGIFCONF failed: ") + System::getErrString() );
-         free(ifc.ifc_req);
-         close(sock);
-
+            std::string("getifaddrs failed: ") + System::getErrString());
          return false;
       }
 
-      /* ifc.ifc_len was updated by ioctl, so if IRSIZE<=ifc.ifc_len then there might be more
-         interfaces, so loop again with larger buffer... */
+      ifaddrs.reset(p);
+   }
 
-   } while (IFRSIZE(numIfcReqs) <= ifc.ifc_len);
-
-
-   // foreach interface
-
-   struct ifreq* ifr = ifc.ifc_req; // pointer to current interface
-
-   for( ; (char*) ifr < (char*) ifc.ifc_req + ifc.ifc_len; ifr++)
+   for (struct ifaddrs* ifa = ifaddrs.get(); ifa != NULL; ifa = ifa->ifa_next)
    {
+      if (ifa->ifa_addr == NULL || ifa->ifa_flags & IFF_LOOPBACK || !(ifa->ifa_flags & IFF_RUNNING))
+         continue;
+
+      if(ifa->ifa_addr->sa_family != AF_INET && ifa->ifa_addr->sa_family != AF_INET6)
+         continue;
+
+      if(ifa->ifa_addr->sa_family == AF_INET6 && disableIPv6)
+         continue;
+
       NicAddress nicAddr;
-
-      if(fillNicAddress(sock, nicType, ifr, &nicAddr) )
+         
+      if(fillNicAddress(nicType, ifa, &nicAddr) )
       {
-         ssize_t metricByListPos = 0;
+         if (nicAddr.ipAddr.isLinkLocal() || nicAddr.ipAddr.isLoopback())
+            continue;
 
-         if (!allowedInterfacesList->empty() &&
-            !ListTk::listContains(nicAddr.name, allowedInterfacesList, &metricByListPos) )
-            continue; // not in the list of allowed interfaces
-
+         if (!allowedInterfacesList->empty() && findNicPosition(*allowedInterfacesList, nicAddr) == -1)
+            continue;
+            
          outList->push_back(nicAddr);
       }
    }
 
-
-   free(ifc.ifc_req);
-   close(sock);
-
    return true;
 }
 
+// Compare nics for sorting
+bool NetworkInterfaceCard::NicAddrComp::operator()(const NicAddress& lhs, const NicAddress& rhs) const
+{
+   // If preferences are set, use these first
+   if (preferences) {
+      int l = findNicPosition(*preferences, lhs);
+      int r = findNicPosition(*preferences, rhs);
+
+      if (r == -1 && l != -1)
+         return true;
+      if (l == -1 && r != -1)
+         return false;
+
+      if (l != r)
+         return l < r;
+   }
+
+   // No preference match, sort by default
+
+   // prefer RDMA NICs
+   if( (lhs.nicType == NICADDRTYPE_RDMA) && (rhs.nicType != NICADDRTYPE_RDMA) )
+      return true;
+   if( (rhs.nicType == NICADDRTYPE_RDMA) && (lhs.nicType != NICADDRTYPE_RDMA) )
+      return false;
+
+   // prefer IPv4
+   bool rhsv4 = rhs.ipAddr.isIPv4();
+   bool lhsv4 = lhs.ipAddr.isIPv4();
+   if (rhsv4 != lhsv4) {
+      return lhsv4;
+   }
+
+   // this is the original IP-order version
+   return lhs.ipAddr > rhs.ipAddr;
+}
+
 /**
- * Checks a list of TCP/IP interfaces for RDMA-capable interfaces.
+ * Checks a list of IP interfaces for RDMA-capable interfaces. RDMA interfaces are
+ * added to outList.
  */
-void NetworkInterfaceCard::filterInterfacesForRDMA(NicAddressList* list, NicAddressList* outList)
+void NetworkInterfaceCard::filterInterfacesForRDMA(const StringList& allowedInterfacesList,
+   NicAddressList* list, NicAddressList* outList)
 {
    // Note: This works by binding an RDMASocket to each IP of the passed list.
 
@@ -150,12 +220,15 @@ void NetworkInterfaceCard::filterInterfacesForRDMA(NicAddressList* list, NicAddr
       {
          auto rdmaSock = RDMASocket::create();
 
-         rdmaSock->bindToAddr(iter->ipAddr.s_addr, 0);
+         rdmaSock->bindToAddr(iter->ipAddr.toSocketAddress(0));
 
          // interface is RDMA-capable => append to outList
 
          NicAddress nicAddr = *iter;
          nicAddr.nicType = NICADDRTYPE_RDMA;
+
+         if (!allowedInterfacesList.empty() && findNicPosition(allowedInterfacesList, nicAddr) == -1)
+            continue;
 
          outList->push_back(nicAddr);
       }
@@ -167,14 +240,14 @@ void NetworkInterfaceCard::filterInterfacesForRDMA(NicAddressList* list, NicAddr
 }
 
 /*
- * Checks for RDMA-capable interfaces in a list of TCP/IP interfaces and adds the devices as
+ * Checks for RDMA-capable interfaces in a list of IP interfaces and adds the devices as
  * new RDMA devices to the list
  *
  * @param nicList a reference to a list of TCP interfaces; RDMA interfaces will be added to the list
  *
  * @return true, if at least one RDMA-capable interface was found
  */
-bool NetworkInterfaceCard::checkAndAddRdmaCapability(NicAddressList& nicList)
+bool NetworkInterfaceCard::checkAndAddRdmaCapability(const StringList& allowedInterfacesList, NicAddressList& nicList)
 {
    // Note: This works by binding an RDMASocket to each IP of the passed list.
 
@@ -190,12 +263,15 @@ bool NetworkInterfaceCard::checkAndAddRdmaCapability(NicAddressList& nicList)
             {
                auto rdmaSock = RDMASocket::create();
 
-               rdmaSock->bindToAddr(iter->ipAddr.s_addr, 0);
+               rdmaSock->bindToAddr(iter->ipAddr.toSocketAddress(0));
 
                // interface is RDMA-capable => append to outList
 
                NicAddress nicAddr = *iter;
                nicAddr.nicType = NICADDRTYPE_RDMA;
+
+               if (!allowedInterfacesList.empty() && findNicPosition(allowedInterfacesList, nicAddr) == -1)
+                  continue;
 
                rdmaInterfaces.push_back(nicAddr);
             }
@@ -213,77 +289,27 @@ bool NetworkInterfaceCard::checkAndAddRdmaCapability(NicAddressList& nicList)
    return foundRdmaInterfaces;
 }
 
-/**
- * This is not needed in the actual app.
- * Nevertheless, it's for some reason part of some tests.
- */
-bool NetworkInterfaceCard::findByName(const char* interfaceName, NicAddress* outAddr)
-{
-   int sock = socket(PF_INET, SOCK_STREAM, IPPROTO_IP);
-   if(sock == -1)
-      return false;
-
-   //struct ifreq* ifr;
-   struct ifreq ifrr;
-   //struct sockaddr_in sa;
-
-   //ifr = &ifrr;
-   ifrr.ifr_addr.sa_family = AF_INET;
-   StringTk::strncpyTerminated(ifrr.ifr_name, interfaceName, sizeof(ifrr.ifr_name) );
-
-   int fillRes = false;
-   if(!ioctl(sock, SIOCGIFADDR, &ifrr) )
-      fillRes = fillNicAddress(sock, NICADDRTYPE_STANDARD, &ifrr, outAddr);
-
-   close(sock);
-
-   return fillRes;
-}
 
 /**
- * @param ifr interface name and IP must be set in ifr when this method is called
+ * @param ifa interface name and IP must be set in ifa when this method is called
  */
-bool NetworkInterfaceCard::fillNicAddress(int sock, NicAddrType nicType, struct ifreq* ifr,
+bool NetworkInterfaceCard::fillNicAddress(NicAddrType nicType, struct ifaddrs* ifa,
    NicAddress* outAddr)
 {
-   // note: struct ifreq contains a union for everything except the name. hence, new ioctl()
-   //    calls overwrite the old data.
-
    // IP address
-   // note: must be done at the beginning because following ioctl-calls will overwrite the data
-   outAddr->ipAddr = ( (struct sockaddr_in *)&ifr->ifr_addr)->sin_addr;
+   outAddr->ipAddr.setAddr(ifa->ifa_addr);
 
    // name
    // note: must be done at the beginning because following ioctl-calls will overwrite the data
-   memcpy(outAddr->name, ifr->ifr_name, sizeof(outAddr->name));
+   memcpy(outAddr->name, ifa->ifa_name, sizeof(outAddr->name));
 
-   // retrieve flags
-   if(ioctl(sock, SIOCGIFFLAGS, ifr) )
-      return false;
+   // copy nicType
+   outAddr->nicType = nicType;
 
-   if(ifr->ifr_flags & IFF_LOOPBACK)
-      return false; // loopback interface => skip
-
-   // skip interfaces that are not currently usable
-   if(!(ifr->ifr_flags & IFF_RUNNING))
-      return false;
-
-   // hardware type and address
-   if(ioctl(sock, SIOCGIFHWADDR, ifr) )
-      return false;
-   else
-   {
-      // select which hardware types to process
-      // (see /usr/include/linux/if_arp.h for the whole the list)
-      switch(ifr->ifr_hwaddr.sa_family)
-      {
-         case ARPHRD_LOOPBACK: return false;
-         default:
-            break;
-      }
-
-      // copy nicType
-      outAddr->nicType = nicType;
+   if (ifa->ifa_addr->sa_family == AF_INET6) {
+      outAddr->protocol = 6;
+   } else {
+      outAddr->protocol = 4;
    }
 
    return true;
@@ -310,7 +336,7 @@ std::string NetworkInterfaceCard::nicAddrToString(NicAddress* nicAddr)
    resultStr += nicAddr->name;
    resultStr += "[";
 
-   resultStr += std::string("ip addr: ") + Socket::ipaddrToStr(nicAddr->ipAddr) + "; ";
+   resultStr += std::string("ip addr: ") + nicAddr->ipAddr.toString() + "; ";
    resultStr += std::string("type: ") + nicTypeToString(nicAddr->nicType);
 
    resultStr += "]";
@@ -333,29 +359,5 @@ void NetworkInterfaceCard::supportedCapabilities(NicAddressList* nicList,
          NicListCapabilities* outCapabilities)
 {
    outCapabilities->supportsRDMA = supportsRDMA(nicList);
-}
-
-bool IPv4Network::parse(const std::string& cidr, IPv4Network& net)
-{
-   std::size_t s = cidr.find('/');
-   if (s > 0 && s < cidr.length() - 1)
-   {
-      std::string addr = cidr.substr(0, s);
-      net.prefix = std::stoi(cidr.substr(s + 1));
-      if (net.prefix > 32)
-         return false;
-
-      struct in_addr ina;
-      if (::inet_pton(AF_INET, addr.c_str(), &ina) == 1)
-      {
-         net.netmask = generateNetmask(net.prefix);
-         net.address.s_addr = ina.s_addr & net.netmask.s_addr;
-         return true;
-      }
-      else
-         return false;
-   }
-   else
-      return false;
 }
 

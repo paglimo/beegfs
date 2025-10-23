@@ -66,13 +66,16 @@ void NodeListRequestor::requestLoop()
 
 bool NodeListRequestor::getMgmtNodeInfo()
 {
+   auto cfg = app->getConfig();
+
    for (unsigned i = 0; i < MGMT_NUM_TRIES; i++)
    {
       LOG(GENERAL, DEBUG, "Waiting for management node...");
 
       // get mgmtd node using NodesTk
-      auto mgmtNode = NodesTk::downloadNodeInfo(app->getConfig()->getSysMgmtdHost(),
-         app->getConfig()->getConnMgmtdPort(), app->getConfig()->getConnAuthHash(),
+      auto mgmtNode = NodesTk::downloadNodeInfo(
+         cfg->getSysMgmtdHost(),
+         cfg->getConnMgmtdPort(), cfg->getConnAuthHash(),
          app->getNetMessageFactory(),
          NODETYPE_Mgmt, MGMT_TIMEOUT.count());
 

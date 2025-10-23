@@ -50,6 +50,7 @@ enum LogTopic
    LogTopic_EVENTLOGGER=9,   // related to file event logger
    LogTopic_DATABASE=10,     // related to database operations
    LogTopic_SOCKLIB=11,      // socket library message (eg ib_lib)
+   LogTopic_CHUNKBALANCING=12, //related to chunk balance operations
    LogTopic_INVALID
 };
 

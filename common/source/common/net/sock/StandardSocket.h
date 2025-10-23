@@ -3,21 +3,23 @@
 #include <common/Common.h>
 #include <common/toolkit/RandomReentrant.h>
 #include "PooledSocket.h"
+#include "common/net/sock/IPAddress.h"
 
 class StandardSocket : public PooledSocket
 {
    public:
-      StandardSocket(int domain, int type, int protocol=0, bool epoll = true);
+      StandardSocket(int type, int protocol=0, bool epoll = true);
       virtual ~StandardSocket();
 
-      static void createSocketPair(int domain, int type, int protocol,
+      // create UNIX domain socket pair
+      static void createSocketPair(int type, int protocol,
          StandardSocket** outEndpointA, StandardSocket** outEndpointB);
 
-      virtual void connect(const char* hostname, unsigned short port);
-      virtual void connect(const struct sockaddr* serv_addr, socklen_t addrlen);
-      virtual void bindToAddr(in_addr_t ipAddr, unsigned short port);
+      virtual void connect(const char* hostname, uint16_t port);
+      virtual void connect(const SocketAddress& serv_addr);
+      virtual void bindToAddr(const SocketAddress& ipAddr);
       virtual void listen();
-      virtual Socket* accept(struct sockaddr* addr, socklen_t* addrlen);
+      virtual Socket* accept(struct sockaddr_storage* addr, socklen_t* addrLen);
       virtual void shutdown();
       virtual void shutdownAndRecvDisconnect(int timeoutMS);
 
@@ -27,22 +29,16 @@ class StandardSocket : public PooledSocket
 #endif /* BEEGFS_NVFS */
 
       virtual ssize_t send(const void *buf, size_t len, int flags);
-      virtual ssize_t sendto(const void *buf, size_t len, int flags,
-         const struct sockaddr *to, socklen_t tolen);
+      virtual ssize_t sendto(const void *buf, size_t len, int flags, const SocketAddress* to);
 
       virtual ssize_t recv(void *buf, size_t len, int flags);
       virtual ssize_t recvT(void *buf, size_t len, int flags, int timeoutMS);
 
-      ssize_t recvfrom(void *buf, size_t len, int flags, struct sockaddr *from, socklen_t *fromlen);
+      ssize_t recvfrom(void *buf, size_t len, int flags, struct sockaddr_storage* from, socklen_t* fromLen);
       ssize_t recvfromT(void *buf, size_t len, int flags,
-         struct sockaddr *from, socklen_t *fromlen, int timeoutMS);
-
-      ssize_t broadcast(const void *buf, size_t len, int flags,
-         struct in_addr* broadcastIP, unsigned short port);
-
+         struct sockaddr_storage *from, socklen_t* fromLen, int timeoutMS);
 
       void setSoKeepAlive(bool enable);
-      void setSoBroadcast(bool enable);
       void setSoReuseAddr(bool enable);
       int getSoRcvBuf();
       void setSoRcvBuf(int size);
@@ -51,12 +47,11 @@ class StandardSocket : public PooledSocket
 
    protected:
       int sock;
-      unsigned short sockDomain; // socket domain (aka protocol family) e.g. PF_INET
       const bool isDgramSocket;
       int epollFD; // only valid for connected or dgram sockets, not valid (-1) for listening sockets
+      int family = 0;
 
-      StandardSocket(int fd, unsigned short sockDomain, struct in_addr peerIP,
-         std::string peername);
+      StandardSocket(int fd, const IPAddress& peerIP, std::string peername);
 
       void addToEpoll(StandardSocket* other);
 
@@ -70,31 +65,12 @@ class StandardSocket : public PooledSocket
          return sock;
       }
 
-      inline unsigned short getSockDomain()
+      int getFamily() const
       {
-         return sockDomain;
+         return family;
       }
-
 
       // inliners
-
-      /**
-       * @throw SocketException
-       */
-      inline ssize_t sendto(const void *buf, size_t len, int flags,
-         struct in_addr ipAddr, unsigned short port)
-      {
-         struct sockaddr_in peerAddr;
-
-         // memset(&peerAddr, 0, sizeof(peerAddr) ); // not required (we set all fields below)
-
-         peerAddr.sin_family        = sockDomain;
-         peerAddr.sin_port          = htons(port);
-         peerAddr.sin_addr.s_addr   = ipAddr.s_addr;
-
-         return this->sendto(buf, len, flags,
-            (struct sockaddr*)&peerAddr, sizeof(peerAddr) );
-      }
 
       /**
        * @return true if incoming data is available, false if a timeout occurred
@@ -151,13 +127,13 @@ class StandardSocketGroup : public StandardSocket
       std::vector<std::shared_ptr<StandardSocket>> subordinates;
 
    public:
-      StandardSocketGroup(int domain, int type, int protocol=0);
+      StandardSocketGroup(int type, int protocol=0);
 
       /**
        * Create a new StandardSocket that is subordinate to "this". The socket can be used
        * for anything except methods that require epoll (i.e. recvT(), recvfromT().
        */
-      std::shared_ptr<StandardSocket> createSubordinate(int domain, int type, int protocol=0);
+      std::shared_ptr<StandardSocket> createSubordinate(int type, int protocol=0);
 
       virtual ~StandardSocketGroup();
 };

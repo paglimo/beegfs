@@ -1,11 +1,11 @@
 #pragma once
 
+#include "common/net/sock/IPAddress.h"
 #include <common/app/log/Logger.h>
 #include <common/app/config/ICommonConfig.h>
 #include <common/net/message/AbstractNetMessageFactory.h>
 #include <common/threading/PThread.h>
 #include <common/toolkit/BitStore.h>
-#include <common/toolkit/NetFilter.h>
 #include <common/toolkit/LockFD.h>
 #include <common/Common.h>
 #include <common/net/sock/RoutingTable.h>
@@ -60,7 +60,7 @@ class AbstractApp : public PThread
    protected:
       NicAddressList localNicList; // intersection set of dicsovered NICs and allowedInterfaces
       Mutex localNicListMutex;
-      std::shared_ptr<NetVector> noDefaultRouteNets;
+      std::shared_ptr<NetFilter> noDefaultRouteNets;
 
       AbstractApp() : PThread("Main", this),
                       noDefaultRouteNets(nullptr)
@@ -82,7 +82,7 @@ class AbstractApp : public PThread
       void updateLocalNicListAndRoutes(LogContext* log, NicAddressList& nicList,
          std::vector<AbstractNodeStore*>& nodeStores);
 
-      bool initNoDefaultRouteList(NetVector* outNets);
+      bool initNoDefaultRouteList(NetFilter* outNets);
 
    private:
       static bool basicInitializations();

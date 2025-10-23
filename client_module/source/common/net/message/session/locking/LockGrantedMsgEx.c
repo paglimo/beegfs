@@ -33,7 +33,7 @@ bool LockGrantedMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx)
 }
 
 bool __LockGrantedMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    const char* logContext = "LockGranted incoming";
    Logger* log = App_getLogger(app);
@@ -44,13 +44,8 @@ bool __LockGrantedMsgEx_processIncoming(NetMessage* this, struct App* app,
    bool gotLockWaiter;
 
    #ifdef LOG_DEBUG_MESSAGES
-      const char* peer;
-
-      peer = fromAddr ?
-         SocketTk_ipaddrToStr(fromAddr->addr) : StringTk_strDup(Socket_getPeername(sock) );
-      LOG_DEBUG_FORMATTED(log, Log_DEBUG, logContext, "Received a AckMsg from: %s", peer);
-
-      kfree(peer);
+   LOG_DEBUG_FORMATTED(log, Log_DEBUG, logContext, "Received a AckMsg from: %s",
+         Socket_formatAddrOrPeername(fromAddr, sock));
    #endif // LOG_DEBUG_MESSAGES
 
    IGNORE_UNUSED_VARIABLE(log);

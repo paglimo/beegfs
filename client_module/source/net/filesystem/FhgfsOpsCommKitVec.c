@@ -3,7 +3,6 @@
 #include <common/net/message/session/rw/WriteLocalFileMsg.h>
 #include <common/net/message/session/rw/WriteLocalFileRespMsg.h>
 #include <common/nodes/MirrorBuddyGroupMapper.h>
-#include <common/FhgfsTypes.h>
 #include <common/toolkit/MessagingTk.h>
 #include <common/storage/StorageErrors.h>
 #include <common/threading/Thread.h>
@@ -190,7 +189,7 @@ void __FhgfsOpsCommKitVec_readfileStagePREPARE(CommKitVecHelper* commHelper,
    {
       Logger_logTopFormatted(commHelper->log, LogTopic_COMMKIT, Log_WARNING, commHelper->logContext,
          "Failed to send message to %s: %s", nodeAndType.buf,
-         Socket_getPeername(comm->sock) );
+         comm->sock->peername);
 
       isSocketException = true;
       goto outErr;
@@ -235,8 +234,7 @@ void __FhgfsOpsCommKitVec_readfileStageRECVHEADER(CommKitVecHelper* commHelper,
       NodeString nodeAndType;
       Node_copyAliasWithTypeStr(comm->node, &nodeAndType);
       Logger_logTopFormatted(commHelper->log, LogTopic_COMMKIT, Log_WARNING, commHelper->logContext,
-         "Failed to receive length info from %s: %s",
-         nodeAndType.buf, Socket_getPeername(comm->sock) );
+         "Failed to receive length info from %s: %s", nodeAndType.buf, comm->sock->peername);
 
       isSocketException = true;
       goto outErr;
@@ -748,8 +746,7 @@ void __FhgfsOpsCommKitVec_writefileStageSENDHEADER(CommKitVecHelper* commHelper,
       NodeString nodeAndType;
       Node_copyAliasWithTypeStr(comm->node, &nodeAndType);
       Logger_logTopFormatted(commHelper->log, LogTopic_COMMKIT, Log_WARNING, commHelper->logContext,
-         "Failed to send message to %s: %s", nodeAndType.buf,
-         Socket_getPeername(comm->sock) );
+         "Failed to send message to %s: %s", nodeAndType.buf, comm->sock->peername);
 
       goto outErr;
    }
@@ -892,9 +889,8 @@ void __FhgfsOpsCommKitVec_writefileStageRECV(CommKitVecHelper* commHelper,
          NodeString nodeAndType;
          Node_copyAliasWithTypeStr(comm->node, &nodeAndType);
          Logger_logTopFormatted(commHelper->log, LogTopic_COMMKIT, Log_WARNING,
-            commHelper->logContext,
-            "Receive failed from: %s @ %s", nodeAndType.buf,
-            Socket_getPeername(comm->sock) );
+            commHelper->logContext, "Receive failed from: %s @ %s",
+            nodeAndType.buf, comm->sock->peername);
       }
 
       isSocketException = true;
@@ -916,8 +912,7 @@ void __FhgfsOpsCommKitVec_writefileStageRECV(CommKitVecHelper* commHelper,
          Logger_logTopFormatted(commHelper->log, LogTopic_COMMKIT, Log_WARNING,
             commHelper->logContext,
             "Received invalid response from %s. Expected type: %d. Disconnecting: %s",
-            nodeAndType.buf, NETMSGTYPE_WriteLocalFileResp,
-            Socket_getPeername(comm->sock) );
+            nodeAndType.buf, NETMSGTYPE_WriteLocalFileResp, comm->sock->peername);
 
          isSocketException = true;
          goto outErr;

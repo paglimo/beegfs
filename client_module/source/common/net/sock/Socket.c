@@ -18,11 +18,12 @@ void _Socket_uninit(Socket* this)
 
 bool Socket_bind(Socket* this, unsigned short port)
 {
-   struct in_addr ipAddr = { INADDR_ANY };
+   // binding to "in6addr_any" should also bind to IPv4 mapped addresses
+   struct in6_addr ipAddr = in6addr_any;
    return this->ops->bindToAddr(this, ipAddr, port);
 }
 
-bool Socket_bindToAddr(Socket* this, struct in_addr ipAddr, unsigned short port)
+bool Socket_bindToAddr(Socket* this, struct in6_addr ipAddr, unsigned short port)
 {
    return this->ops->bindToAddr(this, ipAddr, port);
 }

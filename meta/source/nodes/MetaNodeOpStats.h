@@ -18,11 +18,12 @@ class MetaNodeOpStats : public NodeOpStats
        * @param nodeIP IP of the node
        * @param opType the filesystem operation to count
        */
-      void updateNodeOp(unsigned nodeIP, MetaOpCounterTypes opType, unsigned userID)
+      void updateNodeOp(const IPAddress& nodeIP, MetaOpCounterTypes opType, unsigned userID)
       {
          SafeRWLock safeLock(&lock, SafeRWLock_READ);
 
-         NodeOpCounterMapIter nodeIter = clientCounterMap.find(nodeIP);
+         uint128_t cookieIP = nodeIP.toUint128();
+         NodeOpCounterMapIter nodeIter = clientCounterMap.find(cookieIP);
          NodeOpCounterMapIter userIter = userCounterMap.find(userID);
 
          if( (nodeIter == clientCounterMap.end() ) ||
@@ -35,7 +36,7 @@ class MetaNodeOpStats : public NodeOpStats
             if(nodeIter == clientCounterMap.end() )
             {
                nodeIter = clientCounterMap.insert(
-                  NodeOpCounterMapVal(nodeIP, MetaOpCounter() ) ).first;
+                  NodeOpCounterMapVal(cookieIP, MetaOpCounter() ) ).first;
             }
 
             if(userIter == userCounterMap.end() )

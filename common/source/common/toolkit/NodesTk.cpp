@@ -16,8 +16,10 @@
 #include <common/threading/PThread.h>
 #include <common/toolkit/MessagingTk.h>
 #include <common/toolkit/Random.h>
-#include <common/toolkit/SocketTk.h>
+#include <exception>
+#include <sys/socket.h>
 #include "NodesTk.h"
+#include "common/net/sock/IPAddress.h"
 
 /**
  * Wait for the first node to appear in the management nodes store.
@@ -31,7 +33,7 @@
  * @return true if heartbeat received, false if cancelled because of termination order
  */
 bool NodesTk::waitForMgmtHeartbeat(PThread* currentThread, AbstractDatagramListener* dgramLis,
-   const NodeStoreServers* mgmtNodes, std::string hostname, unsigned short portUDP,
+   const NodeStoreServers* mgmtNodes, std::string hostname, uint16_t portUDP,
    unsigned timeoutMS, unsigned nameResolutionRetries)
 {
    bool gotMgmtHeartbeat = false;
@@ -50,15 +52,15 @@ bool NodesTk::waitForMgmtHeartbeat(PThread* currentThread, AbstractDatagramListe
    {
       if(lastRetryTime.elapsedMS() >= nextRetryDelayMS)
       { // time to send request again
-         const auto ipAddr = SocketTk::getHostByName(hostname.c_str());
-         if(ipAddr)
-         {
-            dgramLis->sendto(&msgBuf[0], msgBuf.size(), 0, ipAddr.value(), portUDP);
+         try {
+            const auto addr = IPAddress::resolve(hostname);
+
+            sockaddr_in6 sas = SocketAddress(addr, portUDP).toSockaddr();
+            dgramLis->sendto(&msgBuf[0], msgBuf.size(), 0, reinterpret_cast<struct sockaddr*>(&sas));
          }
-         else
-         {
+         catch (std::exception &e) {
             LOG(COMMUNICATION, ERR, "Failed to resolve hostname.", hostname,
-                  ("System error", ipAddr.error()));
+                  e.what());
             if (nameResolutionRetries != 0 && --nameResolutionRetries == 0)
                break;
          }
@@ -88,7 +90,7 @@ bool NodesTk::waitForMgmtHeartbeat(PThread* currentThread, AbstractDatagramListe
  * @param timeoutMS -1 for infinite
  */
 std::shared_ptr<Node> NodesTk::downloadNodeInfo(const std::string& hostname,
-   unsigned short port, uint64_t connAuthHash, AbstractNetMessageFactory* netMessageFactory,
+   uint16_t port, uint64_t connAuthHash, AbstractNetMessageFactory* netMessageFactory,
    NodeType nodeType, int timeoutMS)
 {
    const Time started;
@@ -97,8 +99,7 @@ std::shared_ptr<Node> NodesTk::downloadNodeInfo(const std::string& hostname,
    {
       try
       {
-         StandardSocket socket(AF_INET, SOCK_STREAM);
-
+         StandardSocket socket(SOCK_STREAM);
          socket.connect(hostname.c_str(), port);
 
          if (connAuthHash)

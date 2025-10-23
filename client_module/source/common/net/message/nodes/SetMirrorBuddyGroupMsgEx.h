@@ -12,7 +12,7 @@ static inline void SetMirrorBuddyGroupMsgEx_init(SetMirrorBuddyGroupMsgEx* this)
 // virtual functions
 extern bool SetMirrorBuddyGroupMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx);
 extern bool __SetMirrorBuddyGroupMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 
 // getters and setters
 static inline NodeType SetMirrorBuddyGroupMsgEx_getNodeType(SetMirrorBuddyGroupMsgEx* this);

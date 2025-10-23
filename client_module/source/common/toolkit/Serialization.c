@@ -175,12 +175,15 @@ void Serialization_serializeNicList(SerializeCtx* ctx, NicAddressList* nicList)
       NicAddress* nicAddr = NicAddressListIter_value(&iter);
       const size_t minNameSize = MIN(sizeof(nicAddr->name), SERIALIZATION_NICLISTELEM_NAME_SIZE);
 
-      // We currently only support and store ipv4 addresses internally, so we always set the
-      // protocol field to 4.
-      Serialization_serializeUInt8(ctx, 4);
-
-      { // ipAddress
-         Serialization_serializeBlock(ctx, &nicAddr->ipAddr.s_addr, sizeof(nicAddr->ipAddr.s_addr) );
+      if (ipv6_addr_v4mapped(&nicAddr->ipAddr))
+      { // Ipv4
+         Serialization_serializeUInt8(ctx, 4);
+         Serialization_serializeBlock(ctx, &nicAddr->ipAddr.s6_addr[12], 4);
+      }
+      else
+      {  // IPv6
+         Serialization_serializeUInt8(ctx, 6);
+         Serialization_serializeBlock(ctx, &nicAddr->ipAddr.s6_addr[0], 16);
       }
 
       { // name
@@ -235,7 +238,6 @@ bool Serialization_deserializeNicListPreprocess(DeserializeCtx* ctx, RawList* ou
 void Serialization_deserializeNicList(const RawList* inList, NicAddressList* outNicList)
 {
    const char* currentNicListPos = inList->data;
-   unsigned skipped = 0;
 
    for(unsigned i = 0; i < inList->elemCount; i++)
    {
@@ -250,16 +252,24 @@ void Serialization_deserializeNicList(const RawList* inList, NicAddressList* out
       }
 
       if (protocol == 4)
-      { // ipAddress
-         // Ipv4 address
-         nicAddr->ipAddr.s_addr = get_unaligned((unsigned*)currentNicListPos);
+      {  // IPv4
+         struct in_addr addr;
+         addr.s_addr = get_unaligned((unsigned*)currentNicListPos);
          currentNicListPos += 4;
-      } else {
-         // If this is an ipv6 address, skip it as it is not supported yet.
-         // 16 bytes ipv6 address + name + nicType + padding
-         currentNicListPos += 16 + SERIALIZATION_NICLISTELEM_NAME_SIZE + 1 + 2;
-         skipped += 1;
-         continue;
+         nicAddr->ipAddr = beegfs_mapped_ipv4(addr);
+      }
+      else if (protocol == 6)
+      {  // IPv6
+         struct in6_addr addr;
+         memcpy(&addr.s6_addr, currentNicListPos, sizeof addr.s6_addr);
+         currentNicListPos += sizeof addr.s6_addr;
+         nicAddr->ipAddr = addr;
+      }
+      else
+      {
+         printk_fhgfs(KERN_WARNING, "Unknown protocol received, can't deserialize address\n");
+         kfree(nicAddr);
+         break;
       }
 
       { // name
@@ -279,10 +289,6 @@ void Serialization_deserializeNicList(const RawList* inList, NicAddressList* out
       }
 
       NicAddressList_append(outNicList, nicAddr);
-   }
-
-   if (skipped > 0) {
-      printk_fhgfs(KERN_INFO, "Skipped deserializing %d unsupported IPv6 Nics", skipped);
    }
 }
 

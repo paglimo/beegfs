@@ -49,14 +49,13 @@ bool RemoveNodeMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx)
 }
 
 bool __RemoveNodeMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "RemoveNodeMsg incoming";
 
    RemoveNodeMsgEx* thisCast = (RemoveNodeMsgEx*)this;
 
-   const char* peer;
    NodeType nodeType = (NodeType)RemoveNodeMsgEx_getNodeType(thisCast);
    NumNodeID nodeID = RemoveNodeMsgEx_getNodeNumID(thisCast);
 
@@ -65,13 +64,9 @@ bool __RemoveNodeMsgEx_processIncoming(NetMessage* this, struct App* app,
    bool serializeRes;
    ssize_t sendRes;
 
-   peer = fromAddr ?
-      SocketTk_ipaddrToStr(fromAddr->addr) : StringTk_strDup(Socket_getPeername(sock) );
    LOG_DEBUG_FORMATTED(log, Log_DEBUG, logContext,
       "Received a RemoveNodeMsg from: %s; Node: %s %hu",
-      peer, Node_nodeTypeToStr(nodeType), nodeID.value);
-   kfree(peer);
-
+      Socket_formatAddrOrPeername(fromAddr, sock), Node_nodeTypeToStr(nodeType), nodeID.value);
 
    if(nodeType == NODETYPE_Meta)
    {

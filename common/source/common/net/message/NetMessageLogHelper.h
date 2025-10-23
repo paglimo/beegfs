@@ -37,6 +37,8 @@ inline std::string netMessageTypeToStr(int type)
       case NETMSGTYPE_GenericDebugResp: return "GenericDebugResp (1030)";
       case NETMSGTYPE_GetClientStats: return "GetClientStats (1031)";
       case NETMSGTYPE_GetClientStatsResp: return "GetClientStatsResp (1032)";
+      case NETMSGTYPE_GetClientStatsV2: return "GetClientStatsV2 (1033)";
+      case NETMSGTYPE_GetClientStatsV2Resp: return "GetClientStatsV2Resp (1034)";
       case NETMSGTYPE_RefreshCapacityPools: return "RefreshCapacityPools (1035)";
       case NETMSGTYPE_StorageBenchControlMsg: return "StorageBenchControlMsg (1037)";
       case NETMSGTYPE_StorageBenchControlMsgResp: return "StorageBenchControlMsgResp (1038)";
@@ -183,10 +185,10 @@ inline std::string netMessageTypeToStr(int type)
       case NETMSGTYPE_SetFilePatternResp: return "SetFilePatternResp (2124)";
       case NETMSGTYPE_CpChunkPaths: return "CpChunkPaths (2125)";
       case NETMSGTYPE_CpChunkPathsResp: return "CpChunkPathsResp (2126)";
-      case NETMSGTYPE_ChunkBalance: return "StartChunkBalance (2127)";
-      case NETMSGTYPE_ChunkBalanceResp: return "StartChunkBalanceResp (2128)";
-      case NETMSGTYPE_StripePatternUpdate: return "StripePatternUpdate (2129)";
-      case NETMSGTYPE_StripePatternUpdateResp: return "StripePatternUpdateResp (2130)";
+      case NETMSGTYPE_StartChunkBalance: return "StartChunkBalance (2127)";
+      case NETMSGTYPE_StartChunkBalanceResp: return "StartChunkBalanceResp (2128)";
+      case NETMSGTYPE_UpdateStripePattern: return "UpdateStripePattern (2129)";
+      case NETMSGTYPE_UpdateStripePatternResp: return "UpdateStripePatternResp (2130)";
       case NETMSGTYPE_SetFileState: return "SetFileState (2131)";
       case NETMSGTYPE_SetFileStateResp: return "SetFileStateResp (2132)";
       case NETMSGTYPE_OpenFile: return "OpenFile (3001)";

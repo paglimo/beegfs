@@ -1,6 +1,5 @@
 #include "StatsCollector.h"
 
-#include <common/toolkit/SocketTk.h>
 #include <common/nodes/OpCounterTypes.h>
 
 #include <app/App.h>
@@ -178,8 +177,8 @@ void StatsCollector::processClientOps(ClientOps& clientOps, NodeType nodeType, b
          }
          else
          {
-            struct in_addr inAddr = { (in_addr_t)opsMapIter->first };
-            id = Socket::ipaddrToStr(inAddr);
+            IPAddress a(opsMapIter->first);
+            id = a.toString();
          }
 
          std::map<std::string, uint64_t> stringOpMap;

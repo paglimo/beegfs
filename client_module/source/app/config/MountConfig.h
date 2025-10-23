@@ -38,6 +38,7 @@ struct MountConfig
    char* connInterfacesList;
    char* connAuthFile;
    char* connDisableAuthentication;
+   char* connDisableIPv6;
 
    bool grpid;
 };
@@ -67,6 +68,7 @@ void MountConfig_uninit(MountConfig* this)
    SAFE_KFREE(this->connInterfacesList);
    SAFE_KFREE(this->connAuthFile);
    SAFE_KFREE(this->connDisableAuthentication);
+   SAFE_KFREE(this->connDisableIPv6);
 }
 
 void MountConfig_destruct(MountConfig* this)

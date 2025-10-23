@@ -8,12 +8,13 @@
 #include <common/toolkit/list/StrCpyList.h>
 #include <common/toolkit/vector/StrCpyVec.h>
 #include <common/toolkit/vector/UInt16Vec.h>
+#include <common/toolkit/NicAddressFilter.h>
 
 
 /* includeTcp indicates whether or not to include TCP NICs in the cloned list */
 extern void ListTk_cloneNicAddressList(NicAddressList* nicList, NicAddressList* nicListClone, bool includeTcp);
 extern void ListTk_cloneSortNicAddressList(NicAddressList* nicList, NicAddressList* nicListClone,
-      StrCpyList* preferences);
+      NicAddressFilter *nicAddressFilter);
 extern void ListTk_copyUInt16ListToVec(UInt16List* srcList, UInt16Vec* destVec);
 
 extern void ListTk_kfreeNicAddressListElems(NicAddressList* nicList);

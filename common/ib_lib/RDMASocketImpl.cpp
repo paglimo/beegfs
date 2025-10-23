@@ -3,6 +3,7 @@
 #include <common/threading/PThread.h>
 #include <common/toolkit/StringTk.h>
 #include "RDMASocketImpl.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <utility>
 
@@ -57,7 +58,7 @@ RDMASocketImpl::RDMASocketImpl()
  *
  * @param sock will be closed/destructed by the destructor of this object
  */
-RDMASocketImpl::RDMASocketImpl(IBVSocket* ibvsock, struct in_addr peerIP, std::string peername)
+RDMASocketImpl::RDMASocketImpl(IBVSocket* ibvsock, const IPAddress& peerIP, std::string peername)
 {
    this->ibvsock = ibvsock;
    this->fd = IBVSocket_getRecvCompletionFD(ibvsock);
@@ -78,26 +79,24 @@ RDMASocketImpl::~RDMASocketImpl()
 /**
  * @throw SocketException
  */
-void RDMASocketImpl::connect(const char* hostname, unsigned short port)
+void RDMASocketImpl::connect(const char* hostname, uint16_t port)
 {
-   Socket::connect(hostname, port, AF_UNSPEC, SOCK_STREAM);
+   Socket::connect(hostname, port, SOCK_STREAM);
 }
 
 /**
  * @throw SocketException
  */
-void RDMASocketImpl::connect(const struct sockaddr* serv_addr, socklen_t addrlen)
+void RDMASocketImpl::connect(const SocketAddress& serv_addr)
 {
-   unsigned short peerPort = ntohs( ( (struct sockaddr_in*)serv_addr)->sin_port );
-
-   this->peerIP = ( (struct sockaddr_in*)serv_addr)->sin_addr;
+   this->peerIP = serv_addr.addr;
 
    // set peername if not done so already (e.g. by connect(hostname) )
 
-   if(peername.empty() )
-      peername = Socket::endpointAddrToStr(peerIP, peerPort);
+   if(peername.empty())
+      peername = serv_addr.toString();
 
-   bool connRes = IBVSocket_connectByIP(ibvsock, peerIP, peerPort, &commCfg);
+   bool connRes = IBVSocket_connectByIP(ibvsock, serv_addr, &commCfg);
    if(!connRes)
       throw SocketConnectException(
          std::string("RDMASocket unable to connect to: ") + std::string(peername) );
@@ -109,14 +108,13 @@ void RDMASocketImpl::connect(const struct sockaddr* serv_addr, socklen_t addrlen
 /**
  * @throw SocketException
  */
-void RDMASocketImpl::bindToAddr(in_addr_t ipAddr, unsigned short port)
+void RDMASocketImpl::bindToAddr(const SocketAddress& ipAddr)
 {
-   bool bindRes = IBVSocket_bindToAddr(ibvsock, ipAddr, port);
+   bool bindRes = IBVSocket_bindToAddr(ibvsock, ipAddr);
    if(!bindRes)
-      throw SocketException("RDMASocket unable to bind to port: " +
-         StringTk::uintToStr(port) );
-   this->bindIP.s_addr = ipAddr;
-   this->bindPort =  port;
+      throw SocketException("RDMASocket unable to bind to: " + ipAddr.toString());
+   this->bindIP = ipAddr.addr;
+   this->bindPort = ipAddr.port;
 }
 
 /**
@@ -137,7 +135,7 @@ void RDMASocketImpl::listen()
  *    alert (=> this is not an error)
  * @throw SocketException
  */
-Socket* RDMASocketImpl::accept(struct sockaddr *addr, socklen_t *addrlen)
+Socket* RDMASocketImpl::accept(struct sockaddr_storage *addr, socklen_t *addrlen)
 {
    IBVSocket* acceptedIBVSocket = NULL;
 
@@ -149,8 +147,8 @@ Socket* RDMASocketImpl::accept(struct sockaddr *addr, socklen_t *addrlen)
       throw SocketException(std::string("RDMASocket unable to accept.") );
 
    // prepare new socket object
-   struct in_addr acceptIP = ( (struct sockaddr_in*)addr)->sin_addr;
-   unsigned short acceptPort = ntohs( ( (struct sockaddr_in*)addr)->sin_port);
+   IPAddress acceptIP(addr);
+   uint16_t acceptPort = extractPort(reinterpret_cast<const sockaddr*>(addr));
 
    std::string acceptPeername = endpointAddrToStr(acceptIP, acceptPort);
 
@@ -238,8 +236,7 @@ ssize_t RDMASocketImpl::send(const void *buf, size_t len, int flags)
  * @param flags ignored
  * @throw SocketException
  */
-ssize_t RDMASocketImpl::sendto(const void *buf, size_t len, int flags,
-   const struct sockaddr *to, socklen_t tolen)
+ssize_t RDMASocketImpl::sendto(const void *buf, size_t len, int flags, const SocketAddress* to)
 {
    ssize_t sendRes = IBVSocket_send(ibvsock, (const char*)buf, len, flags | MSG_NOSIGNAL);
    if(sendRes == (ssize_t)len)

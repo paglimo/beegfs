@@ -1,6 +1,7 @@
 #ifndef APP_H_
 #define APP_H_
 
+#include "common/net/sock/IPAddress.h"
 #include <app/Config.h>
 #include <common/app/AbstractApp.h>
 #include <common/app/log/Logger.h>
@@ -10,7 +11,6 @@
 #include <common/nodes/NodeStoreClients.h>
 #include <common/nodes/Node.h>
 #include <common/toolkit/MessagingTk.h>
-#include <common/toolkit/NetFilter.h>
 #include <common/toolkit/NodesTk.h>
 #include <misc/TSDatabase.h>
 #include <components/CleanUp.h>
@@ -50,8 +50,8 @@ class App : public AbstractApp
       std::unique_ptr<TargetMapper> targetMapper;
 
       std::unique_ptr<Config> cfg;
-      std::unique_ptr<NetFilter> netFilter;
-      std::unique_ptr<NetFilter> tcpOnlyFilter;
+      NetFilter netFilter;
+      NetFilter tcpOnlyFilter;
       std::unique_ptr<NetMessageFactory> netMessageFactory;
       NicListCapabilities localNicCaps;
       std::shared_ptr<Node> localNode;
@@ -109,14 +109,14 @@ class App : public AbstractApp
          return cfg.get();
       }
 
-      virtual NetFilter* getNetFilter() const override
+      const NetFilter* getNetFilter() const override
       {
-         return netFilter.get();
+         return &netFilter;
       }
 
-      virtual NetFilter* getTcpOnlyFilter() const override
+      const NetFilter* getTcpOnlyFilter() const override
       {
-         return tcpOnlyFilter.get();
+         return &tcpOnlyFilter;
       }
 
       virtual AbstractNetMessageFactory* getNetMessageFactory() const override

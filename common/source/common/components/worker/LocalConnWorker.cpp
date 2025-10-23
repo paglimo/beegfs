@@ -14,7 +14,7 @@ LocalConnWorker::LocalConnWorker(const std::string& workerID)
 {
    try
    {
-      StandardSocket::createSocketPair(PF_UNIX, SOCK_STREAM, 0, &workerEndpoint, &clientEndpoint);
+      StandardSocket::createSocketPair(SOCK_STREAM, 0, &workerEndpoint, &clientEndpoint);
 
       applySocketOptions(workerEndpoint);
       applySocketOptions(clientEndpoint);

@@ -10,7 +10,7 @@
  * @return false on error
  */
 bool NetMessage_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    // Note: Has to be implemented appropriately by derived classes.
    // Empty implementation provided here for invalid messages and other messages

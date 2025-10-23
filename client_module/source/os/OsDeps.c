@@ -1,6 +1,5 @@
 #include <common/Common.h>
 #include <os/OsDeps.h>
-#include <common/FhgfsTypes.h>
 #include <common/net/sock/NicAddress.h>
 #include <common/net/sock/Socket.h>
 #include <filesystem/FhgfsOps_versions.h>

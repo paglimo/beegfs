@@ -148,7 +148,7 @@ void Config_destruct(Config* this)
 
 bool _Config_initConfig(Config* this, MountConfig* mountConfig)
 {
-   struct in_addr ipAddr;
+   struct in6_addr ipAddr;
 
    StrCpyMap_init(&this->configMap);
 
@@ -178,7 +178,7 @@ bool _Config_initConfig(Config* this, MountConfig* mountConfig)
    }
 
    if(!SocketTk_getHostByAddrStr(this->sysMgmtdHost, &ipAddr)) {
-      printk_fhgfs(KERN_WARNING, "Management address '%s' is not an IPv4 address\n", this->sysMgmtdHost);
+      printk_fhgfs(KERN_WARNING, "Management address '%s' is not an IP address\n", this->sysMgmtdHost);
       goto error;
    }
 
@@ -253,6 +253,7 @@ void _Config_loadDefaults(Config* this)
    _Config_configMapRedefine(this, "connAuthFile",                     "");
    _Config_configMapRedefine(this, "connDisableAuthentication",        "false");
    _Config_configMapRedefine(this, "connTcpOnlyFilterFile",            "");
+   _Config_configMapRedefine(this, "connDisableIPv6",                  "false");
 
    /* connMessagingTimeouts: default to zero, indicating that constants
     * specified in Common.h are used.
@@ -300,8 +301,11 @@ void _Config_loadDefaults(Config* this)
    // but the client only needs to fetch the states once during that period.
 
    _Config_configMapRedefine(this, "sysXAttrsEnabled",                 "false");
-   _Config_configMapRedefine(this, "sysXAttrsCheckCapabilities",       "never");
+   _Config_configMapRedefine(this, "sysXAttrsCheckCapabilities",       CHECKCAPABILITIES_NEVER_STR);
+   _Config_configMapRedefine(this, "sysSELinuxEnabled",                "false");
+   _Config_configMapRedefine(this, "sysSELinuxRevalidate",             "cache");
    _Config_configMapRedefine(this, "sysACLsEnabled",                   "false");
+   _Config_configMapRedefine(this, "sysACLsRevalidate",                ACLSREVALIDATE_CACHE_STR);
    _Config_configMapRedefine(this, "sysBypassFileAccessCheckOnMeta",   "false");
 
    _Config_configMapRedefine(this, "quotaEnabled",                     "false");
@@ -505,6 +509,9 @@ bool _Config_applyConfigMap(Config* this)
          SAFE_KFREE(this->connTcpOnlyFilterFile);
          this->connTcpOnlyFilterFile = StringTk_strDup(valueStr);
       }
+      else
+      if(!strcmp(keyStr, "connDisableIPv6") )
+         this->connDisableIPv6 = StringTk_strToBool(valueStr);
       else
       if(!strcmp(keyStr, "connMessagingTimeouts"))
       {
@@ -721,11 +728,30 @@ bool _Config_applyConfigMap(Config* this)
             this->sysXAttrsCheckCapabilities = CHECKCAPABILITIES_Never;
       }
       else
+      if(!strcmp(keyStr, "sysSELinuxEnabled") )
+         this->sysSELinuxEnabled = StringTk_strToBool(valueStr);
+      else
+      if(!strcmp(keyStr, "sysSELinuxRevalidate") )
+      {
+         if (!strcmp(valueStr, SELINUX_REVALIDATE_ALWAYS_STR))
+            this->sysSELinuxRevalidate = SELINUX_REVALIDATE_MODE_Always;
+         else
+            this->sysSELinuxRevalidate = SELINUX_REVALIDATE_MODE_Cache;
+      }
+      else
       if(!strcmp(keyStr, "sysBypassFileAccessCheckOnMeta"))
          this->sysBypassFileAccessCheckOnMeta = StringTk_strToBool(valueStr);
       else
       if(!strcmp(keyStr, "sysACLsEnabled") )
          this->sysACLsEnabled = StringTk_strToBool(valueStr);
+      else
+      if(!strcmp(keyStr, "sysACLsRevalidate") )
+      {
+         if (!strcmp(valueStr, ACLSREVALIDATE_ALWAYS_STR))
+            this->sysACLsRevalidate = ACLSREVALIDATE_Always;
+         else if (!strcmp(valueStr, ACLSREVALIDATE_CACHE_STR))
+            this->sysACLsRevalidate = ACLSREVALIDATE_Cache;
+      }
       else
       if (!strcmp(keyStr, "sysRenameEbusyAsXdev"))
          this->sysRenameEbusyAsXdev = StringTk_strToBool(valueStr);
@@ -933,6 +959,10 @@ void __Config_loadFromMountConfig(Config* this, MountConfig* mountConfig)
    if(mountConfig->connDisableAuthentication)
       _Config_configMapRedefine(this, "connDisableAuthentication",
          mountConfig->connDisableAuthentication);
+
+   if(mountConfig->connDisableIPv6)
+      _Config_configMapRedefine(this, "connDisableIPv6",
+         mountConfig->connDisableIPv6);
 
    // integer args
 
@@ -1277,8 +1307,8 @@ bool __Config_initImplicitVals(Config* this)
       this->connUDPRcvBufSize = this->connRDMABufNum * this->connRDMABufSize;
    }
 
-   // Automatically enable XAttrs if ACLs have been enabled
-   if (this->sysACLsEnabled && !this->sysXAttrsEnabled)
+   // Automatically enable XAttrs if ACLs or SELinux have been enabled
+   if ((this->sysACLsEnabled || this->sysSELinuxEnabled) && !this->sysXAttrsEnabled)
    {
       this->sysXAttrsEnabled = true;
       this->sysXAttrsImplicitlyEnabled = true;
@@ -1454,8 +1484,10 @@ const char* Config_rdmaKeyTypeNumToStr(RDMAKeyType keyType)
          return RDMAKEYTYPE_REGISTER_STR;
       case RDMAKEYTYPE_UnsafeDMA:
          return RDMAKEYTYPE_UNSAFE_DMA_STR;
-      default:
+      case RDMAKEYTYPE_UnsafeGlobal:
          return RDMAKEYTYPE_UNSAFE_GLOBAL_STR;
+      default:
+         return "(invalid value)";
    }
 }
 
@@ -1467,8 +1499,36 @@ const char* Config_checkCapabilitiesTypeToStr(CheckCapabilities checkCapabilitie
          return CHECKCAPABILITIES_CACHE_STR;
       case CHECKCAPABILITIES_Never:
          return CHECKCAPABILITIES_NEVER_STR;
-      default:
+      case CHECKCAPABILITIES_Always:
          return CHECKCAPABILITIES_ALWAYS_STR;
+      default:
+         return "(invalid value)";
+   }
+}
+
+const char* Config_checkSELinuxRevalidateModeTypeToStr(SELinuxRevalidateMode checkSELinuxRevalidateMode)
+{
+   switch(checkSELinuxRevalidateMode)
+   {
+      case SELINUX_REVALIDATE_MODE_Always:
+         return SELINUX_REVALIDATE_ALWAYS_STR;
+      case SELINUX_REVALIDATE_MODE_Cache:
+         return SELINUX_REVALIDATE_CACHE_STR;
+      default:
+         return "(invalid value)";
+   }
+}
+
+const char* Config_ACLsRevalidateToStr(ACLsRevalidate aclsRevalidate)
+{
+   switch(aclsRevalidate)
+   {
+      case ACLSREVALIDATE_Cache:
+         return ACLSREVALIDATE_CACHE_STR;
+      case ACLSREVALIDATE_Always:
+         return ACLSREVALIDATE_ALWAYS_STR;
+      default:
+         return "(invalid value)";
    }
 }
 

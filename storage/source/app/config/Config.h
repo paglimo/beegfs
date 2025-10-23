@@ -52,6 +52,8 @@ class Config : public AbstractConfig
       unsigned    tuneNumResyncSlaves;
       bool        tuneUseAggressiveStreamPoll; // true to not sleep on epoll in streamlisv2
       bool        tuneUsePerTargetWorkers; // true to have tuneNumWorkers separate for each target
+      unsigned    tuneChunkBalanceQueueLimit;  //maximum number of items in chunk balancing queue
+
 
       bool        quotaEnableEnforcement;
       bool        quotaDisableZfsSupport;
@@ -224,6 +226,9 @@ class Config : public AbstractConfig
       {
          return sysTargetOfflineTimeoutSecs;
       }
+      
+      unsigned getTuneChunkBalanceQueueLimit() const { return tuneChunkBalanceQueueLimit; }
 
-};
+   };
+
 

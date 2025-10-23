@@ -1,4 +1,5 @@
 #include "NodeOpStats.h"
+#include "common/Common.h"
 
 /**
  * @param cookieIP  - If several transfers are required to transfer the map to the client,
@@ -10,8 +11,8 @@
  *                    numOPs, IP1, opCounter1, opCounter2, ..., opCounterN,
  *                    IP2, opCounter1, opCounter2, ..., opCounterN, IP3, ...
  */
-bool NodeOpStats::mapToUInt64Vec(uint64_t cookieIP, size_t bufLen, bool wantPerUserStats,
-   UInt64Vector *outVec)
+bool NodeOpStats::mapToUInt128Vec(uint128_t cookieIP, size_t bufLen, bool wantPerUserStats,
+   Uint128Vector *outVec)
 {
    SafeRWLock safeLock(&lock, SafeRWLock_READ); // L O C K
 
@@ -20,7 +21,7 @@ bool NodeOpStats::mapToUInt64Vec(uint64_t cookieIP, size_t bufLen, bool wantPerU
 
    // position iter right after given cookieIP (if any)
 
-   if (cookieIP == ~0ULL)
+   if (uint128::lower64(cookieIP) == ~0ULL && uint128::upper64(cookieIP) == ~0ULL)
    {
       // NOTE: This is a bit tricky. For some reasons we also have to deal with cookieIP = 0
       // and as it is an unsigned, we also cannot initialize with '-1'. Therefore fhgfs-ctl
@@ -94,8 +95,8 @@ int NodeOpStats::getMaxIPsPerVector(OpCounter *opCounter, size_t bufLen)
    // vector layout is: headerElem1..n, IP1, counterIP1_1..n, IP2, counterIP2_1..n, IP3, ...
 
 
-   // maximum number of uint64_t elements fitting into the vector
-   int numElems = bufLen / sizeof(uint64_t);
+   // maximum number of uint128_t elements fitting into the vector
+   int numElems = bufLen / sizeof(uint128_t);
 
    // available for per-IP vectors without the space for header elements
    int numAvailableIPElems = numElems - STATS_VEC_RESERVED_ELEMENTS;
@@ -112,7 +113,7 @@ int NodeOpStats::getMaxIPsPerVector(OpCounter *opCounter, size_t bufLen)
 /**
  * Pre-alloc internal vector buffers for given number of IPs
  */
-bool NodeOpStats::reserveVector(OpCounter *opCounter, size_t numIPs, UInt64Vector *outVec)
+bool NodeOpStats::reserveVector(OpCounter *opCounter, size_t numIPs, Uint128Vector *outVec)
 {
    int numOpCounters = opCounter->getNumCounter();
    int perIPElems = numOpCounters + OPCOUNTERVECTOR_POS_FIRSTCOUNTER;

@@ -11,8 +11,8 @@
  * @param portTCP value 0 if undefined
  * @param nicList will be forwarded to the NodeConnPool which creates its own internal copy
  */
-Node::Node(NodeType nodeType, std::string nodeID, NumNodeID nodeNumID, unsigned short portUDP,
-      unsigned short portTCP, const NicAddressList& nicList) :
+Node::Node(NodeType nodeType, std::string nodeID, NumNodeID nodeNumID, uint16_t portUDP,
+      uint16_t portTCP, const NicAddressList& nicList) :
    nodeType(nodeType), alias(nodeID)
 {
    this->numID = nodeNumID;
@@ -28,7 +28,7 @@ Node::Node(NodeType nodeType, std::string nodeID, NumNodeID nodeNumID, unsigned 
  *
  * @param portUDP value 0 if undefined
  */
-Node::Node(NodeType nodeType, std::string nodeID, NumNodeID nodeNumID, unsigned short portUDP):
+Node::Node(NodeType nodeType, std::string nodeID, NumNodeID nodeNumID, uint16_t portUDP):
    nodeType(nodeType), alias(std::move(nodeID))
 {
    this->numID = nodeNumID;
@@ -92,7 +92,7 @@ Time Node::getLastHeartbeatTUnlocked()
  * @param portTCP value 0 if undefined
  * @param nicList will be copied
  */
-bool Node::updateInterfaces(unsigned short portUDP, unsigned short portTCP, NicAddressList& nicList)
+bool Node::updateInterfaces(uint16_t portUDP, uint16_t portTCP, NicAddressList& nicList)
 {
    const std::lock_guard<Mutex> lock(mutex);
 
@@ -104,7 +104,7 @@ bool Node::updateInterfaces(unsigned short portUDP, unsigned short portTCP, NicA
  * @param portTCP value 0 if undefined
  * @param nicList will be copied
  */
-bool Node::updateInterfacesUnlocked(unsigned short portUDP, unsigned short portTCP,
+bool Node::updateInterfacesUnlocked(uint16_t portUDP, uint16_t portTCP,
    NicAddressList& nicList)
 {
    this->portUDP = portUDP ? portUDP : this->portUDP;

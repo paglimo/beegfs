@@ -24,7 +24,7 @@ add_library(
 	./source/net/message/session/FSyncLocalFileMsgEx.cpp
 	./source/net/message/NetMessageFactory.cpp
 	./source/net/message/nodes/SetTargetConsistencyStatesMsgEx.cpp
-	./source/net/message/nodes/GetClientStatsMsgEx.h
+	./source/net/message/nodes/GetClientStatsV2MsgEx.h
 	./source/net/message/nodes/MapTargetsMsgEx.cpp
 	./source/net/message/nodes/RefreshTargetStatesMsgEx.cpp
 	./source/net/message/nodes/storagepools/RefreshStoragePoolsMsgEx.h
@@ -32,7 +32,7 @@ add_library(
 	./source/net/message/nodes/HeartbeatMsgEx.cpp
 	./source/net/message/nodes/RemoveBuddyGroupMsgEx.h
 	./source/net/message/nodes/HeartbeatRequestMsgEx.h
-	./source/net/message/nodes/GetClientStatsMsgEx.cpp
+	./source/net/message/nodes/GetClientStatsV2MsgEx.cpp
 	./source/net/message/nodes/PublishCapacitiesMsgEx.h
 	./source/net/message/nodes/GenericDebugMsgEx.cpp
 	./source/net/message/nodes/GetTargetConsistencyStatesMsgEx.h
@@ -114,6 +114,9 @@ add_library(
 	./source/components/buddyresyncer/BuddyResyncerFileSyncSlave.cpp
 	./source/components/buddyresyncer/BuddyResyncerFileSyncSlave.h
 	./source/components/buddyresyncer/BuddyResyncer.h
+	./source/components/buddyresyncer/ChunkFileResyncer.cpp
+	./source/components/chunkbalancer/ChunkBalancerJob.cpp
+	./source/components/chunkbalancer/ChunkBalancerFileSyncSlave.cpp
 	./source/components/StorageStatsCollector.cpp
 	./source/session/ZfsSession.h
 	./source/session/Session.h

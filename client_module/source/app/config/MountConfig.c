@@ -17,6 +17,7 @@ enum {
    Opt_connInterfacesList,
    Opt_connAuthFile,
    Opt_connDisableAuthentication,
+   Opt_connDisableIPv6,
 
    /* Mount options that take integer arguments */
    Opt_logLevel,
@@ -43,6 +44,7 @@ static match_table_t fhgfs_mount_option_tokens =
    { Opt_connInterfacesList, "connInterfacesList=%s" },
    { Opt_connAuthFile, "connAuthFile=%s" },
    { Opt_connDisableAuthentication, "connDisableAuthentication=%s" },
+   { Opt_connDisableIPv6, "connDisableIPv6=%s" },
 
    /* Mount options that take integer arguments */
    { Opt_logLevel, "logLevel=%d" },
@@ -140,6 +142,13 @@ bool MountConfig_parseFromRawOptions(MountConfig* this, char* mountOptions)
             this->connDisableAuthentication = match_strdup(args);
          } break;
 
+         case Opt_connDisableIPv6:
+         {
+            SAFE_KFREE(this->connDisableIPv6);
+
+            this->connDisableIPv6 = match_strdup(args);
+         } break;
+
          /* Mount options that take INTEGER arguments */
 
          case Opt_logLevel:
@@ -216,10 +225,13 @@ void MountConfig_showOptions(MountConfig* this, struct seq_file* sf)
       seq_printf(sf, ",connInterfacesList=%s", this->connInterfacesList);
 
    if (this->connAuthFile)
-      seq_printf(sf, ",connAuthFile=%s", this->connInterfacesList);
+      seq_printf(sf, ",connAuthFile=%s", this->connAuthFile);
 
    if (this->connDisableAuthentication)
-      seq_printf(sf, ",connDisableAuthentication=%s", this->connInterfacesList);
+      seq_printf(sf, ",connDisableAuthentication=%s", this->connDisableAuthentication);
+
+   if (this->connDisableIPv6)
+      seq_printf(sf, ",connDisableIPv6=%s", this->connDisableIPv6);
 
    if (this->logLevelDefined)
       seq_printf(sf, ",logLevel=%d", this->logLevel);

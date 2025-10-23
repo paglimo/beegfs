@@ -1,6 +1,10 @@
 #include "ClientOps.h"
+#include "common/net/message/nodes/GetClientStatsV2Msg.h"
+#include "common/net/message/nodes/GetClientStatsV2RespMsg.h"
 
+#include <algorithm>
 #include <common/toolkit/MessagingTk.h>
+#include <common/toolkit/UInt128.h>
 #include <common/net/message/nodes/GetClientStatsMsg.h>
 #include <common/net/message/nodes/GetClientStatsRespMsg.h>
 
@@ -12,7 +16,7 @@
 * Add a list of ops belonging to a specific id (e.g. ip/user) to the store if there isn't one already
 * or sum it up with the existing one
 */
-bool ClientOps::addOpsList(uint64_t id, const OpsList& opsList)
+bool ClientOps::addOpsList(uint128_t id, const OpsList& opsList)
 {
    const std::lock_guard<Mutex> lock(idOpsMapMutex);
 
@@ -111,75 +115,147 @@ void ClientOps::clear()
 /**
 * Request client ops data from a node and returns an unordered map <id, OpsList> .
 */
-ClientOpsRequestor::IdOpsUnorderedMap ClientOpsRequestor::request(Node& node, bool perUser)
+ClientOpsRequestor::IdOpsUnorderedMap ClientOpsRequestor::request(Node& node, bool perUser, bool useClientStatsV2)
 {
-   uint64_t currentID = ~0ULL;
+   IdOpsUnorderedMap resultMap;
    bool moreData = false;
    uint64_t numOps = 0;
 
-   IdOpsUnorderedMap resultMap;
+   if(useClientStatsV2) {
+      uint128_t currentID = ~0;
 
-   do
-   {
-      GetClientStatsMsg getClientStatsMsg(currentID);
+      do {
+         GetClientStatsV2Msg msg(currentID);
 
-      if (perUser)
-         getClientStatsMsg.addMsgHeaderFeatureFlag(GETCLIENTSTATSMSG_FLAG_PERUSERSTATS);
+         if (perUser)
+            msg.addMsgHeaderFeatureFlag(GETCLIENTSTATSMSG_FLAG_PERUSERSTATS);
 
-      const auto respMsg = MessagingTk::requestResponse(node, getClientStatsMsg,
-            NETMSGTYPE_GetClientStatsResp);
+         const auto respMsg = MessagingTk::requestResponse(node, msg, NETMSGTYPE_GetClientStatsV2Resp);
 
-      if (!respMsg)
-      {
-         LOG(GENERAL, DEBUG, "Node is not responding: " + node.getNodeIDWithTypeStr());
-         return ClientOpsRequestor::IdOpsUnorderedMap();
-      }
-
-      GetClientStatsRespMsg* respMsgCast = static_cast<GetClientStatsRespMsg*>(respMsg.get());
-      std::vector<uint64_t> dataVector;
-      respMsgCast->getStatsVector().swap(dataVector);
-
-      moreData = !!dataVector.at(NODE_OPS_POS_MORE_DATA);
-      numOps = dataVector.at(NODEOPS_POS_NUMOPS);
-
-      if (dataVector.at(NODE_OPS_POS_LAYOUT_VERSION) != OPCOUNTER_VEC_LAYOUT_VERS)
-      {
-         LOG(GENERAL, ERR, "Protocol version mismatch in received Message from "
-               + node.getNodeIDWithTypeStr());
-         return ClientOpsRequestor::IdOpsUnorderedMap();
-      }
-
-      auto iter = dataVector.begin();
-      iter += NODE_OPS_POS_FIRSTDATAELEMENT;
-      unsigned counter = 0;
-      ClientOps::OpsList opsList;
-
-      for (; iter != dataVector.end(); iter++)
-      {
-         if (counter == 0)
-            currentID = *iter;
-         else
-            opsList.push_back(*iter);
-
-         counter++;
-
-         if (counter > numOps)
+         if (!respMsg)
          {
-            resultMap.insert(std::make_pair(currentID, std::move(opsList)));
+            LOG(GENERAL, DEBUG, "Node is not responding: " + node.getNodeIDWithTypeStr());
+            return ClientOpsRequestor::IdOpsUnorderedMap();
+         }
 
-            opsList.clear();
-            counter = 0;
+         GetClientStatsV2RespMsg* respMsgCast = static_cast<GetClientStatsV2RespMsg*>(respMsg.get());
+         const Uint128Vector& dataVector = respMsgCast->getStatsVector();
+
+         moreData = !!dataVector.at(NODE_OPS_POS_MORE_DATA);
+         numOps = dataVector.at(NODEOPS_POS_NUMOPS);
+
+         if (dataVector.at(NODE_OPS_POS_LAYOUT_VERSION) != OPCOUNTER_VEC_LAYOUT_VERS)
+         {
+            LOG(GENERAL, ERR, "Protocol version mismatch in received Message from "
+                  + node.getNodeIDWithTypeStr());
+            return ClientOpsRequestor::IdOpsUnorderedMap();
+         }
+
+         auto iter = dataVector.begin();
+         iter += NODE_OPS_POS_FIRSTDATAELEMENT;
+         unsigned counter = 0;
+         ClientOps::OpsList opsList;
+
+         for (; iter != dataVector.end(); iter++)
+         {
+            if (counter == 0)
+               currentID = *iter;
+            else
+               opsList.push_back(*iter);
+
+            counter++;
+
+            if (counter > numOps)
+            {
+               resultMap.insert(std::make_pair(currentID, std::move(opsList)));
+               opsList.clear();
+               counter = 0;
+            }
+         }
+
+         if (counter != 0)
+         {
+            LOG(GENERAL, ERR,
+                  "Reported length of ClientStats OpsList doesn't match the actual length.");
+            return ClientOpsRequestor::IdOpsUnorderedMap();
+         }
+
+      }
+      while (moreData);
+   } else {
+      uint64_t currentID = ~0;
+
+      do {
+         GetClientStatsMsg msg(currentID);
+
+         if (perUser)
+            msg.addMsgHeaderFeatureFlag(GETCLIENTSTATSMSG_FLAG_PERUSERSTATS);
+
+         const auto respMsg = MessagingTk::requestResponse(node, msg,
+               NETMSGTYPE_GetClientStatsResp);
+
+         if (!respMsg)
+         {
+            LOG(GENERAL, DEBUG, "Node is not responding: " + node.getNodeIDWithTypeStr());
+            return ClientOpsRequestor::IdOpsUnorderedMap();
+         }
+
+         GetClientStatsRespMsg* respMsgCast = static_cast<GetClientStatsRespMsg*>(respMsg.get());
+         const std::vector<uint64_t>& dataVector = respMsgCast->getStatsVector();
+
+         moreData = !!dataVector.at(NODE_OPS_POS_MORE_DATA);
+         numOps = dataVector.at(NODEOPS_POS_NUMOPS);
+
+         if (dataVector.at(NODE_OPS_POS_LAYOUT_VERSION) != OPCOUNTER_VEC_LAYOUT_VERS)
+         {
+            LOG(GENERAL, ERR, "Protocol version mismatch in received Message from "
+                  + node.getNodeIDWithTypeStr());
+            return ClientOpsRequestor::IdOpsUnorderedMap();
+         }
+
+         auto iter = dataVector.begin();
+         iter += NODE_OPS_POS_FIRSTDATAELEMENT;
+         unsigned counter = 0;
+         ClientOps::OpsList opsList;
+
+         for (; iter != dataVector.end(); iter++)
+         {
+            if (counter == 0)
+               currentID = *iter;
+            else
+               opsList.push_back(*iter);
+
+            counter++;
+
+            if (counter > numOps)
+            {
+               uint128_t id = (uint128_t)currentID;
+
+               // If this id is a old style uint64_t represented ipv4 address (which is actually
+               // an in_addr_t in original network byte order!), we must convert it properly so
+               // the uint128_t encoded address get properly parsed as an ipv4 address later.
+               // Unfortunately we don't have access to that info later before the data is written,
+               // so we have to do it here.
+               if(!perUser) {
+                  auto ip = IPAddress((in_addr_t)currentID);
+                  id = ip.toUint128();
+               }
+
+               resultMap.insert(std::make_pair(id, std::move(opsList)));
+               opsList.clear();
+               counter = 0;
+            }
+         }
+
+         if (counter != 0)
+         {
+            LOG(GENERAL, ERR,
+                  "Reported length of ClientStats OpsList doesn't match the actual length.");
+            return ClientOpsRequestor::IdOpsUnorderedMap();
          }
       }
-
-      if (counter != 0)
-      {
-         LOG(GENERAL, ERR,
-               "Reported length of ClientStats OpsList doesn't match the actual length.");
-         return ClientOpsRequestor::IdOpsUnorderedMap();
-      }
+      while (moreData);
    }
-   while (moreData);
 
    return resultMap;
 }

@@ -55,11 +55,13 @@ void RequestMetaDataWork::process(char* bufIn, unsigned bufInLen, char* bufOut, 
             node->setLastStatRequestTime(lastStatsRequestTime);
          }
 
+         bool useClientStatsV2 = metaRspMsg->isMsgHeaderFeatureFlagSet(RequestMetaDataRespMsg::MsgFlags::USE_CLIENT_STATS_V2);
+
          if (collectClientOpsByNode)
-            result.ipOpsUnorderedMap = ClientOpsRequestor::request(*node, false);
+            result.ipOpsUnorderedMap = ClientOpsRequestor::request(*node, false, useClientStatsV2);
 
          if (collectClientOpsByUser)
-            result.userOpsUnorderedMap = ClientOpsRequestor::request(*node, true);
+            result.userOpsUnorderedMap = ClientOpsRequestor::request(*node, true, useClientStatsV2);
       }
    }
 

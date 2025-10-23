@@ -15,7 +15,7 @@ static inline void RemoveNodeMsgEx_initFromNodeData(RemoveNodeMsgEx* this,
 extern void RemoveNodeMsgEx_serializePayload(NetMessage* this, SerializeCtx* ctx);
 extern bool RemoveNodeMsgEx_deserializePayload(NetMessage* this, DeserializeCtx* ctx);
 extern bool __RemoveNodeMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
+   struct sockaddr_in6* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen);
 
 // getters & setters
 static inline NumNodeID RemoveNodeMsgEx_getNodeNumID(RemoveNodeMsgEx* this);

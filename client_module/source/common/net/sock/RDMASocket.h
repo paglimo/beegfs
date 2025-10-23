@@ -18,15 +18,15 @@ struct NicAddressStats;
 typedef struct NicAddressStats NicAddressStats;
 
 
-extern __must_check bool RDMASocket_init(RDMASocket* this, struct in_addr srcIpAddr, NicAddressStats* nicStats);
-extern RDMASocket* RDMASocket_construct(struct in_addr srcIpAddr, NicAddressStats* nicStats);
+extern __must_check bool RDMASocket_init(RDMASocket* this, int domain, struct in6_addr srcIpAddr, NicAddressStats* nicStats);
+extern RDMASocket* RDMASocket_construct(int sockDomain, struct in6_addr srcIpAddr, NicAddressStats* nicStats);
 extern void _RDMASocket_uninit(Socket* this);
 
 extern bool RDMASocket_rdmaDevicesExist(void);
 
-extern bool _RDMASocket_connectByIP(Socket* this, struct in_addr ipaddress,
+extern bool _RDMASocket_connectByIP(Socket* this, struct in6_addr ipaddress,
    unsigned short port);
-extern bool _RDMASocket_bindToAddr(Socket* this, struct in_addr ipaddress,
+extern bool _RDMASocket_bindToAddr(Socket* this, struct in6_addr ipaddress,
    unsigned short port);
 extern bool _RDMASocket_listen(Socket* this);
 extern bool _RDMASocket_shutdown(Socket* this);
@@ -35,7 +35,7 @@ extern bool _RDMASocket_shutdownAndRecvDisconnect(Socket* this, int timeoutMS);
 extern ssize_t _RDMASocket_recvT(Socket* this, struct iov_iter* iter, int flags,
    int timeoutMS);
 extern ssize_t _RDMASocket_sendto(Socket* this, struct iov_iter* iter, int flags,
-   fhgfs_sockaddr_in *to);
+   struct sockaddr_in6 *to);
 
 extern unsigned long RDMASocket_poll(RDMASocket* this, short events, bool finishPoll);
 

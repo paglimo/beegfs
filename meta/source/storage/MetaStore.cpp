@@ -1502,13 +1502,28 @@ FhgfsOpsErr MetaStore::unlinkDentryAndInodeUnlocked(const std::string& fileName,
          retVal = FhgfsOpsErr_INUSE;
       }
 
-      FhgfsOpsErr decRes = subdir.fileStore.decLinkCount(*inode, &entryInfo);
-      if (decRes != FhgfsOpsErr_SUCCESS)
+      // Prevent link count underflow for disposal files.
+      // Context: File inodes are de-inlined and disposal dentries are created during unlink
+      // operations and inodes already have their link count set to 0. If such a file is still
+      // open/busy when disposal cleanup runs, we successfully delete the dentry but the inode
+      // remains referenced.
+      // Bug: The original code unconditionally decremented the link count, causing
+      // underflow (0 -> 0xFFFFFFFF) and corrupting inode metadata when processing
+      // disposal files that are still busy/open.
+      // Solution: Only decrement link count if > 0. This preserves:
+      // - Normal file unlink behavior (non-disposal files are unaffected)
+      // - Disposal cleanup safety (skips decrement when already 0)
+      // - Proper cleanup on close() (removes inode and storage chunks when no longer busy)
+      if (outNumHardlinks > 0)
       {
-         LogContext(logContext).logErr("Failed to decrease the link count."
-            " parentEntryID: " + parentEntryID +
-            ", entryID: "      + entryInfo.getEntryID() +
-            ", entryName: "    + fileName);
+         FhgfsOpsErr decRes = subdir.fileStore.decLinkCount(*inode, &entryInfo);
+         if (decRes != FhgfsOpsErr_SUCCESS)
+         {
+            LogContext(logContext).logErr("Failed to decrease the link count."
+               " parentEntryID: " + parentEntryID +
+               ", entryID: "      + entryInfo.getEntryID() +
+               ", entryName: "    + fileName);
+         }
       }
 
       releaseFileUnlocked(subdir, inode);
@@ -2157,6 +2172,7 @@ FhgfsOpsErr MetaStore::verifyAndMoveFileInode(DirInode& parentDir, EntryInfo* fi
 FhgfsOpsErr MetaStore::verifyAndMoveFileInodeUnlocked(DirInode& parentDir, EntryInfo* fileInfo,
    FileInodeMode moveMode)
 {
+   const char* logContext = "MetaStore (verify and move file inode)";
    App* app = Program::getApp();
    FhgfsOpsErr retVal = FhgfsOpsErr_SUCCESS;
 
@@ -2169,6 +2185,28 @@ FhgfsOpsErr MetaStore::verifyAndMoveFileInodeUnlocked(DirInode& parentDir, Entry
    if (!parentDir.getDentry(fileInfo->getFileName(), fileDentry))
    {
       return FhgfsOpsErr_PATHNOTEXISTS;
+   }
+
+   // Detect and prevent rename–hardlink race condition.
+   //
+   // The client provides an EntryID for a file (e.g., "file.txt") that was resolved during an earlier
+   // path lookup. However, between that resolution and the current hardlink request, another client
+   // may have renamed the original file and created a new one with the same name.
+   //
+   // Example:
+   //   Client-provided: fileName = "file.txt", EntryID = "C-686F5744-68"
+   //   Dentry data (from disk):  fileName = "file.txt", EntryID = "D-686F5744-68" (different file)
+   //
+   // This check ensures we operate on the originally intended inode. Without it, we risk applying the
+   // hardlink to the wrong file, resulting in a dangling dentry.
+   if (fileDentry.getEntryID() != fileInfo->getEntryID())
+   {
+      LogContext(logContext).log(Log_WARNING,
+         "Aborting hardlink operation due to EntryID mismatch - potential race with rename detected. "
+         "EntryID (from client): " + fileInfo->getEntryID() +
+         ", EntryID (from dentry): " + fileDentry.getEntryID() +
+         ", Filename: " + fileInfo->getFileName());
+      return FhgfsOpsErr_INTERNAL;
    }
 
    if (moveMode == MODE_INVALID)
@@ -2607,9 +2645,15 @@ FhgfsOpsErr MetaStore::setFileState(EntryInfo* entryInfo, const FileState& state
    const char* logContext = "MetaStore (set file state)";
    UniqueRWLock metaLock(rwlock, SafeRWLock_READ);
 
+
+   FileEvent fileEvent; //create and initialize FileEvent object
+   fileEvent.type = FileEventType::INODE_LOCKED;
+   fileEvent.path = entryInfo->getFileName();
+   fileEvent.targetValid = false;
+   
    // Add inode to global lock store for exclusive access
    GlobalInodeLockStore* lockStore = this->getInodeLockStore();
-   if (!lockStore->insertFileInode(entryInfo))
+   if (!lockStore->insertFileInode(entryInfo, &fileEvent, true))
    {
       LogContext(logContext).log(Log_DEBUG, "Inode is locked in global lock store; "
          "state update rejected. EntryID: " + entryInfo->getEntryID());

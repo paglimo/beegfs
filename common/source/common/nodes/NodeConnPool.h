@@ -33,9 +33,16 @@ struct NodeConnPoolStats
  */
 struct NodeConnPoolErrorState
 {
-   uint32_t lastSuccessPeerIP; // the last IP that we connected to successfully
+   IPAddress lastSuccessPeerIP; // the last IP that we connected to successfully
    NicAddrType lastSuccessNicType; // the last nic type that we connected to successfully
    bool wasLastTimeCompleteFail; // true if last attempt failed on all routes
+
+   void clear()
+   {
+      lastSuccessPeerIP.setAddr((in_addr_t) 0);
+      lastSuccessNicType = (NicAddrType) 0;
+      wasLastTimeCompleteFail = false;
+   }
 
    bool getWasLastTimeCompleteFail()
    {
@@ -44,11 +51,11 @@ struct NodeConnPoolErrorState
 
    void setCompleteFail()
    {
-      this->lastSuccessPeerIP = 0;
+      this->lastSuccessPeerIP.setAddr((in_addr_t) 0);
       this->wasLastTimeCompleteFail = true;
    }
 
-   void setConnSuccess(uint32_t lastSuccessPeerIP, NicAddrType lastSuccessNicType)
+   void setConnSuccess(const IPAddress& lastSuccessPeerIP, NicAddrType lastSuccessNicType)
    {
       this->lastSuccessPeerIP = lastSuccessPeerIP;
       this->lastSuccessNicType = lastSuccessNicType;
@@ -56,7 +63,7 @@ struct NodeConnPoolErrorState
       this->wasLastTimeCompleteFail = false;
    }
 
-   bool equalsLastSuccess(uint32_t lastSuccessPeerIP, NicAddrType lastSuccessNicType)
+   bool equalsLastSuccess(const IPAddress& lastSuccessPeerIP, NicAddrType lastSuccessNicType)
    {
       return (this->lastSuccessPeerIP == lastSuccessPeerIP) &&
          (this->lastSuccessNicType == lastSuccessNicType);
@@ -64,10 +71,10 @@ struct NodeConnPoolErrorState
 
    bool isLastSuccessInitialized()
    {
-      return (this->lastSuccessPeerIP != 0);
+      return !this->lastSuccessPeerIP.isZero();
    }
 
-   bool shouldPrintConnectedLogMsg(uint32_t currentPeerIP, NicAddrType currentNicType)
+   bool shouldPrintConnectedLogMsg(const IPAddress& currentPeerIP, NicAddrType currentNicType)
    {
       /* log only if we didn't succeed at all last time, or if we succeeded last time and it was
          with a different IP/NIC pair */
@@ -77,7 +84,7 @@ struct NodeConnPoolErrorState
          !equalsLastSuccess(currentPeerIP, currentNicType);
    }
 
-   bool shouldPrintConnectFailedLogMsg(uint32_t currentPeerIP, NicAddrType currentNicType)
+   bool shouldPrintConnectFailedLogMsg(const IPAddress& currentPeerIP, NicAddrType currentNicType)
    {
       /* log only if this is the first connection attempt or if we succeeded last time this this
          IP/NIC pair */
@@ -94,7 +101,7 @@ struct NodeConnPoolErrorState
 class NodeConnPool
 {
    public:
-      NodeConnPool(Node& parentNode, unsigned short streamPort, const NicAddressList& nicList);
+      NodeConnPool(Node& parentNode, uint16_t streamPort, const NicAddressList& nicList);
       virtual ~NodeConnPool();
 
       NodeConnPool(const NodeConnPool&) = delete;
@@ -110,7 +117,7 @@ class NodeConnPool
       unsigned disconnectAndResetIdleStreams();
 
       // returns true if the interfaces are different than those currently known
-      virtual bool updateInterfaces(unsigned short streamPort, const NicAddressList& nicList);
+      virtual bool updateInterfaces(uint16_t streamPort, const NicAddressList& nicList);
 
       bool getFirstPeerName(NicAddrType nicType, std::string* outPeerName, bool* outIsNonPrimary);
 
@@ -123,7 +130,7 @@ class NodeConnPool
 
       AbstractApp* app;
       Node& parentNode; // backlink to the node object to which this conn pool belongs
-      unsigned short streamPort;
+      uint16_t streamPort;
       NicListCapabilities localNicCaps;
       NicAddressList localNicList;
 
@@ -162,7 +169,7 @@ class NodeConnPool
          return nicList;
       }
 
-      unsigned short getStreamPort()
+      uint16_t getStreamPort()
       {
          const std::lock_guard<Mutex> lock(mutex);
 

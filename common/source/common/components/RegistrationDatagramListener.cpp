@@ -1,4 +1,5 @@
 #include "RegistrationDatagramListener.h"
+#include "common/net/sock/IPAddress.h"
 
 RegistrationDatagramListener::RegistrationDatagramListener(NetFilter* netFilter,
    NicAddressList& localNicList, AcknowledgmentStore* ackStore, unsigned short udpPort,
@@ -8,10 +9,10 @@ RegistrationDatagramListener::RegistrationDatagramListener(NetFilter* netFilter,
 {
 }
 
-void RegistrationDatagramListener::handleIncomingMsg(struct sockaddr_in* fromAddr, NetMessage* msg)
+void RegistrationDatagramListener::handleIncomingMsg(struct sockaddr* fromAddr, NetMessage* msg)
 {
    HighResolutionStats stats; // currently ignored
-   std::shared_ptr<StandardSocket> sock = findSenderSock(fromAddr->sin_addr);
+   std::shared_ptr<StandardSocket> sock = findSenderSock(IPAddress(fromAddr));
    if (sock == nullptr)
    {
       log.log(Log_WARNING, "Could not handle incoming message: no socket");
@@ -35,7 +36,7 @@ void RegistrationDatagramListener::handleIncomingMsg(struct sockaddr_in* fromAdd
       { // valid, but not within this context
          log.log(Log_SPAM,
             "Received a message that is invalid within the current context "
-            "from: " + Socket::ipaddrToStr(fromAddr->sin_addr) + "; "
+            "from: " + Socket::ipaddrToStr(fromAddr) + "; "
             "type: " + netMessageTypeToStr(msg->getMsgType() ) );
       } break;
    };

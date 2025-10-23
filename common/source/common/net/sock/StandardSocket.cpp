@@ -1,31 +1,39 @@
+#include <cerrno>
 #include <common/app/AbstractApp.h>
 #include <common/app/log/LogContext.h>
 #include <common/system/System.h>
 #include <common/threading/PThread.h>
 #include <common/toolkit/StringTk.h>
 #include "StandardSocket.h"
+#include "common/net/sock/IPAddress.h"
+#include "IPAddress.h"
 
+#include <netinet/in.h>
 #include <sys/epoll.h>
+#include <sys/socket.h>
 
 
 #define STANDARDSOCKET_CONNECT_TIMEOUT_MS         5000
 #define STANDARDSOCKET_UDP_COOLING_SLEEP_US      10000
 #define STANDARDSOCKET_UDP_COOLING_RETRIES           5
 
-
 /**
  * @throw SocketException
  */
-StandardSocket::StandardSocket(int domain, int type, int protocol, bool epoll)
-   : isDgramSocket(type == SOCK_DGRAM)
+StandardSocket::StandardSocket(int type, int protocol, bool epoll)
+   : sock(-1), isDgramSocket(type == SOCK_DGRAM)
 {
-   this->sockDomain = domain;
+   if (Socket::isIPv6Available()) {
+      this->sock = ::socket(AF_INET6, type, protocol);
+      this->family = AF_INET6;
+   } else {
+      // Fall back to ipv4 if ipv6 is not supported
+      this->sock = ::socket(AF_INET, type, protocol);
+      this->family = AF_INET;
+   }
 
-   this->sock = ::socket(domain, type, protocol);
-   if(sock == -1)
-   {
-      throw SocketException(std::string("Error during socket creation: ") +
-         System::getErrString() );
+   if(this->sock == -1) {
+      throw SocketException(std::string("Error during socket creation: ") + System::getErrString());
    }
 
    if (epoll)
@@ -52,12 +60,10 @@ StandardSocket::StandardSocket(int domain, int type, int protocol, bool epoll)
  * @throw SocketException in case epoll_create fails, the caller will need to close the
  * corresponding socket file descriptor (fd)
  */
-StandardSocket::StandardSocket(int fd, unsigned short sockDomain, struct in_addr peerIP,
-   std::string peername)
+StandardSocket::StandardSocket(int fd, const IPAddress& peerIP, std::string peername)
    : isDgramSocket(false)
 {
    this->sock = fd;
-   this->sockDomain = sockDomain;
    this->peerIP = peerIP;
    this->peername = peername;
 
@@ -83,13 +89,14 @@ StandardSocket::~StandardSocket()
 /**
  * @throw SocketException
  */
-void StandardSocket::createSocketPair(int domain, int type, int protocol,
+void StandardSocket::createSocketPair(int type, int protocol,
    StandardSocket** outEndpointA, StandardSocket** outEndpointB)
 {
    int socket_vector[2];
-   struct in_addr loopbackIP = {INADDR_LOOPBACK};
+   in_addr loopbackv4 = {htonl(INADDR_LOOPBACK)};
+   IPAddress loopbackIP(loopbackv4);
 
-   int pairRes = socketpair(domain, type, protocol, socket_vector);
+   int pairRes = socketpair(AF_UNIX, type, protocol, socket_vector);
 
    if(pairRes == -1)
    {
@@ -102,9 +109,9 @@ void StandardSocket::createSocketPair(int domain, int type, int protocol,
 
    try
    {
-      *outEndpointA = new StandardSocket(socket_vector[0], domain, loopbackIP,
+      *outEndpointA = new StandardSocket(socket_vector[0], loopbackIP,
          std::string("Localhost:PeerFD#") + StringTk::intToStr(socket_vector[0]) );
-      *outEndpointB = new StandardSocket(socket_vector[1], domain, loopbackIP,
+      *outEndpointB = new StandardSocket(socket_vector[1], loopbackIP,
          std::string("Localhost:PeerFD#") + StringTk::intToStr(socket_vector[1]) );
    }
    catch(SocketException& e)
@@ -126,30 +133,38 @@ void StandardSocket::createSocketPair(int domain, int type, int protocol,
 /**
  * @throw SocketException
  */
-void StandardSocket::connect(const char* hostname, unsigned short port)
+void StandardSocket::connect(const char* hostname, uint16_t port)
 {
-   Socket::connect(hostname, port, sockDomain, SOCK_STREAM);
+   Socket::connect(hostname, port, SOCK_STREAM);
 }
 
 /**
  * @throw SocketException
  */
-void StandardSocket::connect(const struct sockaddr* serv_addr, socklen_t addrlen)
+void StandardSocket::connect(const SocketAddress& serv_addr)
 {
    const int timeoutMS = STANDARDSOCKET_CONNECT_TIMEOUT_MS;
-   std::string peerAddr = Socket::endpointAddrToStr((const struct sockaddr_in*)serv_addr);
 
-   LOG(SOCKLIB, DEBUG, "Connect StandardSocket", ("socket", this), ("addr", peerAddr),
-      ("bindIP", Socket::ipaddrToStr(bindIP)));
+   LOG(SOCKLIB, DEBUG, "Connect StandardSocket", ("socket", this), ("addr", serv_addr.toString()),
+      ("bindIP", bindIP.toString()));
 
    // set peername if not done so already (e.g. by connect(hostname) )
    if(peername.empty() )
-      peername = peerAddr;
+      peername = serv_addr.toString();
 
    int flagsOrig = fcntl(sock, F_GETFL, 0);
    fcntl(sock, F_SETFL, flagsOrig | O_NONBLOCK); // make the socket nonblocking
 
-   int connRes = ::connect(sock, serv_addr, addrlen);
+   int connRes;
+   if (this->family == AF_INET) {
+      // IPv4 fallback
+      sockaddr_in sa = serv_addr.toIPv4Sockaddr();
+      connRes = ::connect(sock, reinterpret_cast<sockaddr*>(&sa), sizeof sa);
+   } else {
+      sockaddr_in6 sa = serv_addr.toSockaddr();
+      connRes = ::connect(sock, reinterpret_cast<sockaddr*>(&sa), sizeof sa);
+   }
+
    if(connRes)
    {
       if(errno == EINPROGRESS)
@@ -175,10 +190,10 @@ void StandardSocket::connect(const struct sockaddr* serv_addr, socklen_t addrlen
          else
          if(!pollRes)
             throw SocketConnectException(
-               std::string("Timeout connecting to: ") + std::string(peername) );
+               std::string("Timeout connecting to: ") + peername );
          else
             throw SocketConnectException(
-               std::string("Error connecting to: ") + std::string(peername) + ". "
+               std::string("Error connecting to: ") + peername + ". "
                "SysErr: " + System::getErrString() );
 
       }
@@ -190,36 +205,47 @@ void StandardSocket::connect(const struct sockaddr* serv_addr, socklen_t addrlen
    }
 
    throw SocketConnectException(
-      std::string("Unable to connect to: ") + std::string(peername) +
+      std::string("Unable to connect to: ") + peername +
       std::string(". SysErr: ") + System::getErrString() );
 }
-
 
 /**
  * @throw SocketException
  */
-void StandardSocket::bindToAddr(in_addr_t ipAddr, unsigned short port)
+void StandardSocket::bindToAddr(const SocketAddress& addr)
 {
-   struct sockaddr_in localaddr_in;
-   memset(&localaddr_in, 0, sizeof(localaddr_in) );
+   LOG(SOCKLIB, DEBUG, "Bind StandardSocket", ("socket", this), ("addr", addr.toString()));
 
-   localaddr_in.sin_family = sockDomain;
-   localaddr_in.sin_addr.s_addr = ipAddr;
-   localaddr_in.sin_port = htons(port);
+   if (this->family == AF_INET) {
+      // IPv4 fallback
+      sockaddr_in sa;
+      if (addr.addr.isZero()) {
+         // Special case for addr being "::" - default bind to all addresses - this isn't valid for
+         // ipv4, so we convert it here
+         sa = sockaddr_in {
+            .sin_port = htons(addr.port),
+            .sin_addr = in_addr { htonl(INADDR_ANY) },
+         };
+      } else {
+         sa = addr.toIPv4Sockaddr();
+      }
+      int bindRes = ::bind(sock, reinterpret_cast<struct sockaddr*>(&sa), sizeof(sockaddr_in));
+      if(bindRes == -1) {
+         throw SocketException("Unable to bind to " + addr.toString() + ". SysErr: " + System::getErrString());
+      }
+   } else {
+      sockaddr_in6 sa = addr.toSockaddr();
+      int bindRes = ::bind(sock, reinterpret_cast<struct sockaddr*>(&sa), sizeof(sockaddr_in6));
+      if(bindRes == -1) {
+         throw SocketException("Unable to bind to " + addr.toString() + ". SysErr: " + System::getErrString());
+      }
+   }
 
-   LOG(SOCKLIB, DEBUG, "Bind StandardSocket", ("socket", this), ("ipAddr", Socket::ipaddrToStr(ipAddr)), ("port", port));
-
-   int bindRes = ::bind(sock, (struct sockaddr *)&localaddr_in, sizeof(localaddr_in) );
-   if (bindRes == -1)
-      throw SocketException("Unable to bind to port: " + StringTk::uintToStr(port) +
-         ". SysErr: " + System::getErrString() );
-
-   bindIP.s_addr = ipAddr;
-   bindPort = port;
+   bindIP = addr.addr;
+   bindPort = addr.port;
 
    if (isDgramSocket)
       peername = std::string("Listen(Port: ") + StringTk::uintToStr(bindPort) + std::string(")");
-
 }
 
 /**
@@ -249,9 +275,9 @@ void StandardSocket::listen()
 /**
  * @throw SocketException
  */
-Socket* StandardSocket::accept(struct sockaddr *addr, socklen_t *addrlen)
+Socket* StandardSocket::accept(struct sockaddr_storage* addr, socklen_t* addrLen)
 {
-   int acceptRes = ::accept(sock, addr, addrlen);
+   int acceptRes = ::accept(sock, reinterpret_cast<struct sockaddr*>(addr), addrLen);
    if(acceptRes == -1)
    {
       throw SocketException(std::string("Error during socket accept(): ") +
@@ -259,15 +285,16 @@ Socket* StandardSocket::accept(struct sockaddr *addr, socklen_t *addrlen)
    }
 
    // prepare new socket object
-   struct in_addr acceptIP = ( (struct sockaddr_in*)addr)->sin_addr;
-   unsigned short acceptPort = ntohs( ( (struct sockaddr_in*)addr)->sin_port);
+   uint16_t acceptPort = extractPort(reinterpret_cast<sockaddr*>(addr));
+   IPAddress acceptIP(addr);
 
    std::string acceptPeername = endpointAddrToStr(acceptIP, acceptPort);
 
    try
    {
-      Socket* acceptedSock = new StandardSocket(acceptRes, sockDomain, acceptIP, acceptPeername);
-
+      Socket* acceptedSock = new StandardSocket(acceptRes, acceptIP, acceptPeername);
+      LOG(COMMUNICATION, DEBUG, std::string("StandardSocket::accept"),
+         ("acceptPeername", acceptPeername));
       return acceptedSock;
    }
    catch(SocketException& e)
@@ -321,12 +348,12 @@ void StandardSocket::shutdownAndRecvDisconnect(int timeoutMS)
  * @throw SocketException
  */
 
-ssize_t StandardSocket::read(const void *buf, size_t len, unsigned lkey, const uint64_t rbuf, unsigned rkey)
+ssize_t StandardSocket::read(const void *buf, size_t len, uint32_t lkey, const uint64_t rbuf, uint32_t rkey)
 {
       throw SocketException("Standard socket doesn't support RDMA read");
 }
 
-ssize_t StandardSocket::write(const void *buf, size_t len, unsigned lkey, const uint64_t rbuf, unsigned rkey)
+ssize_t StandardSocket::write(const void *buf, size_t len, uint32_t lkey, const uint64_t rbuf, uint32_t rkey)
 {
       throw SocketException("Standard socket doesn't support RDMA write");
 }
@@ -365,8 +392,7 @@ ssize_t StandardSocket::send(const void *buf, size_t len, int flags)
  *
  * @throw SocketException
  */
-ssize_t StandardSocket::sendto(const void *buf, size_t len, int flags,
-   const struct sockaddr *to, socklen_t tolen)
+ssize_t StandardSocket::sendto(const void *buf, size_t len, int flags, const SocketAddress* to)
 {
    const char* logContext = "StandardSocket::sendto";
    int tries = 0;
@@ -376,14 +402,19 @@ ssize_t StandardSocket::sendto(const void *buf, size_t len, int flags,
    while (tries < STANDARDSOCKET_UDP_COOLING_RETRIES)
    {
       tries++;
-#ifdef BEEGFS_DEBUG_IP
-      if (to != NULL)
-         LOG(COMMUNICATION, DEBUG, std::string("sendto"),
-            ("addr", Socket::endpointAddrToStr((const struct sockaddr_in*) to)),
-            ("bindIP", Socket::ipaddrToStr(bindIP)),
-            ("len", len));
-#endif
-      ssize_t sendRes = ::sendto(sock, buf, len, flags | MSG_NOSIGNAL, to, tolen);
+      ssize_t sendRes;
+
+      if(to == nullptr) {
+         sendRes = ::sendto(sock, buf, len, flags | MSG_NOSIGNAL, nullptr, 0);
+      } else if(family == AF_INET) {
+         // IPv4 fallback
+         sockaddr_in sa = to->toIPv4Sockaddr();
+         sendRes = ::sendto(sock, buf, len, flags | MSG_NOSIGNAL, reinterpret_cast<sockaddr*>(&sa), sizeof sa);
+      } else {
+         sockaddr_in6 sa = to->toSockaddr();
+         sendRes = ::sendto(sock, buf, len, flags | MSG_NOSIGNAL, reinterpret_cast<sockaddr*>(&sa), sizeof sa);
+      }
+
       if(sendRes == (ssize_t)len)
       {
          stats->incVals.netSendBytes += len;
@@ -430,7 +461,7 @@ ssize_t StandardSocket::sendto(const void *buf, size_t len, int flags,
    std::string toStr;
    if(to)
    {
-      toStr = Socket::endpointAddrToStr((struct sockaddr_in*)to);
+      toStr = to->toString();
    }
 
    if(errCode == ENETUNREACH)
@@ -542,15 +573,18 @@ ssize_t StandardSocket::recvT(void *buf, size_t len, int flags, int timeoutMS)
  * @throw SocketException
  */
 ssize_t StandardSocket::recvfrom(void  *buf, size_t len, int flags,
-   struct sockaddr *from, socklen_t *fromlen)
+   struct sockaddr_storage* from, socklen_t* fromLen)
 {
-   int recvRes = ::recvfrom(sock, buf, len, flags, from, fromlen);
+   *fromLen = sizeof(*from);
+   int recvRes = ::recvfrom(sock, buf, len, flags, reinterpret_cast<struct sockaddr*>(from), fromLen);
 #ifdef BEEGFS_DEBUG_IP
-   if (isDgramSocket && from)
+   if (isDgramSocket)
+   {
          LOG(COMMUNICATION, DEBUG, std::string("recvfrom"),
-            ("addr", Socket::endpointAddrToStr((const struct sockaddr_in*) from)),
-            ("bindIP", Socket::ipaddrToStr(bindIP)),
+            ("addr",  (recvRes != -1 ? (from? Socket::endpointAddrToStr(from) : "null") : "error")),
+            ("bindIP", bindIP.toString()),
             ("recvRes", recvRes));
+   }
 #endif
    if(recvRes > 0)
    {
@@ -562,9 +596,8 @@ ssize_t StandardSocket::recvfrom(void  *buf, size_t len, int flags,
    {
       if (isDgramSocket)
       {
-         struct sockaddr_in* sin = (struct sockaddr_in*)from;
          LOG(COMMUNICATION, NOTICE, "Received empty UDP datagram.", peername,
-            ("addr", (sin? Socket::endpointAddrToStr(sin) : std::string("null"))));
+            ("addr", (from? Socket::endpointAddrToStr(from) : std::string("null"))));
          return 0;
       }
       else
@@ -604,7 +637,7 @@ void StandardSocket::addToEpoll(StandardSocket* other)
  * @throw SocketException
  */
 ssize_t StandardSocket::recvfromT(void  *buf, size_t len, int flags,
-   struct sockaddr *from, socklen_t *fromlen, int timeoutMS)
+   struct sockaddr_storage *from, socklen_t* fromLen, int timeoutMS)
 {
    struct epoll_event epollEvent;
 
@@ -618,7 +651,7 @@ ssize_t StandardSocket::recvfromT(void  *buf, size_t len, int flags,
       if(likely( (epollRes > 0) && (epollEvent.events & EPOLLIN) ) )
       {
          StandardSocket* s = reinterpret_cast<StandardSocket*>(epollEvent.data.ptr);
-         int recvRes = s->recvfrom(buf, len, flags, from, fromlen);
+         int recvRes = s->recvfrom(buf, len, flags, from, fromLen);
          return recvRes;
       }
       else
@@ -658,25 +691,6 @@ ssize_t StandardSocket::recvfromT(void  *buf, size_t len, int flags,
 /**
  * @throw SocketException
  */
-ssize_t StandardSocket::broadcast(const void *buf, size_t len, int flags,
-   struct in_addr* broadcastIP, unsigned short port)
-{
-   struct sockaddr_in broadcastAddr;
-
-   memset(&broadcastAddr, 0, sizeof(broadcastAddr) );
-
-   broadcastAddr.sin_family         = sockDomain;
-   broadcastAddr.sin_addr           = *broadcastIP;
-   //broadcastAddr.sin_addr.s_addr    = inet_addr("255.255.255.255");//htonl(INADDR_BROADCAST);
-   broadcastAddr.sin_port           = htons(port);
-
-   return this->sendto(buf, len, flags,
-      (struct sockaddr*)&broadcastAddr, sizeof(broadcastAddr) );
-}
-
-/**
- * @throw SocketException
- */
 void StandardSocket::setSoKeepAlive(bool enable)
 {
    int keepAliveVal = (enable ? 1 : 0);
@@ -689,23 +703,6 @@ void StandardSocket::setSoKeepAlive(bool enable)
 
    if(setRes == -1)
       throw SocketException(std::string("setSoKeepAlive: ") + System::getErrString() );
-}
-
-/**
- * @throw SocketException
- */
-void StandardSocket::setSoBroadcast(bool enable)
-{
-   int broadcastVal = (enable ? 1 : 0);
-
-   int setRes = setsockopt(sock,
-      SOL_SOCKET,
-      SO_BROADCAST,
-      &broadcastVal,
-      sizeof(broadcastVal) );
-
-   if(setRes == -1)
-      throw SocketException(std::string("setSoBroadcast: ") + System::getErrString() );
 }
 
 /**
@@ -828,14 +825,14 @@ void StandardSocket::setTcpCork(bool enable)
 }
 
 
-StandardSocketGroup::StandardSocketGroup(int domain, int type, int protocol)
-   : StandardSocket(domain, type, protocol, true)
+StandardSocketGroup::StandardSocketGroup(int type, int protocol)
+   : StandardSocket(type, protocol, true)
 {
 }
 
-std::shared_ptr<StandardSocket> StandardSocketGroup::createSubordinate(int domain, int type, int protocol)
+std::shared_ptr<StandardSocket> StandardSocketGroup::createSubordinate(int type, int protocol)
 {
-   std::shared_ptr<StandardSocket> newSock = std::make_shared<StandardSocket>(domain, type, protocol, false);
+   std::shared_ptr<StandardSocket> newSock = std::make_shared<StandardSocket>(type, protocol, false);
    subordinates.push_back(newSock);
    addToEpoll(newSock.get());
    return newSock;

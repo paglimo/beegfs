@@ -1,10 +1,9 @@
 #pragma once
 
 #include <common/storage/StorageErrors.h>
-#include <common/net/message/nodes/GetClientStatsMsg.h>
+#include <common/net/message/nodes/GetClientStatsV2Msg.h>
 
-
-class GetClientStatsMsgEx : public GetClientStatsMsg
+class GetClientStatsV2MsgEx : public GetClientStatsV2Msg
 {
    public:
       virtual bool processIncoming(ResponseContext& ctx);

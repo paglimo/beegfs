@@ -160,11 +160,14 @@ int __FhgfsOps_revalidateIntent(struct dentry* parentDentry, struct dentry* dent
 
    FhgfsOpsHelper_logOp(Log_SPAM, app, dentry, inode, logContext);
 
-
-   if (cacheValid)
+   if (cacheValid && (Config_getsysSELinuxRevalidate(cfg) != SELINUX_REVALIDATE_MODE_Always))
    {
       isValid = 1;
       return isValid;
+   }
+
+   if (inode && Config_getsysSELinuxEnabled(cfg)) {
+      security_inode_invalidate_secctx(inode);
    }
 
    if(IS_ROOT(dentry) )
@@ -174,7 +177,6 @@ int __FhgfsOps_revalidateIntent(struct dentry* parentDentry, struct dentry* dent
       const EntryInfo* parentInfo;
       EntryInfo* entryInfo;
       uint32_t  metaVersion;
-
 
       FhgfsOpsErr remotingRes;
       LookupIntentInfoIn inInfo; // input data for combo-request

@@ -125,6 +125,10 @@ std::string to_string(const FileEventType& fileEvent)
          return "LastWriterClosed";
       case FileEventType::OPEN_BLOCKED:
          return "OpenBlocked";
+      case FileEventType::STRIPE_PATTERN_CHANGED:
+         return "StripePatternChanged";
+      case FileEventType::INODE_LOCKED:
+         return "InodeLocked";
    }
    return "";
 }

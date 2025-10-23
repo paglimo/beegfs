@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cerrno>
 #include <common/app/log/LogContext.h>
 #include <common/threading/Atomics.h>
 #include <common/threading/PThread.h>
@@ -8,19 +9,16 @@
 #include <common/net/message/NetMessage.h>
 #include <common/nodes/AbstractNodeStore.h>
 #include <common/toolkit/AcknowledgmentStore.h>
-#include <common/toolkit/NetFilter.h>
 #include <common/Common.h>
 #include "ComponentInitException.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <mutex>
 
 #define DGRAMMGR_RECVBUF_SIZE    65536
 #define DGRAMMGR_SENDBUF_SIZE    DGRAMMGR_RECVBUF_SIZE
 
-// forward declaration
-class NetFilter;
-
-typedef std::unordered_map<struct in_addr, std::shared_ptr<StandardSocket>, InAddrHash> StandardSocketMap;
+typedef std::unordered_map<IPAddress, std::shared_ptr<StandardSocket>, std::hash<IPAddress>> StandardSocketMap;
 
 class AbstractDatagramListener : public PThread
 {
@@ -48,11 +46,11 @@ class AbstractDatagramListener : public PThread
       void sendDummyToSelfUDP();
 
    private:
-      std::shared_ptr<StandardSocket> findSenderSockUnlocked(struct in_addr addr);
+      std::shared_ptr<StandardSocket> findSenderSockUnlocked(const IPAddress& addr);
 
    protected:
       AbstractDatagramListener(const std::string& threadName, NetFilter* netFilter,
-         NicAddressList& localNicList, AcknowledgmentStore* ackStore, unsigned short udpPort,
+         NicAddressList& localNicList, AcknowledgmentStore* ackStore, uint16_t udpPort,
          bool restrictOutboundInterfaces);
 
       LogContext log;
@@ -61,15 +59,14 @@ class AbstractDatagramListener : public PThread
       AcknowledgmentStore* ackStore;
       bool restrictOutboundInterfaces;
 
-      unsigned short udpPort;
-      unsigned short udpPortNetByteOrder;
-      in_addr_t loopbackAddrNetByteOrder; // (because INADDR_... constants are in host byte order)
+      uint16_t udpPort;
+      uint16_t udpPortNetByteOrder;
 
       char* sendBuf;
 
-      virtual void handleIncomingMsg(struct sockaddr_in* fromAddr, NetMessage* msg) = 0;
+      virtual void handleIncomingMsg(struct sockaddr* fromAddr, NetMessage* msg) = 0;
 
-      std::shared_ptr<StandardSocket> findSenderSock(struct in_addr addr);
+      std::shared_ptr<StandardSocket> findSenderSock(const IPAddress& fromAddr);
 
       /**
        * Returns the mutex related to seralization of sends.
@@ -105,7 +102,7 @@ class AbstractDatagramListener : public PThread
       void run();
       void listenLoop();
 
-      bool isDGramFromSelf(struct sockaddr_in* fromAddr);
+      bool isDGramFromSelf(const IPAddress& fromAddr, uint16_t port);
       unsigned incAckCounter();
 
    public:
@@ -115,27 +112,29 @@ class AbstractDatagramListener : public PThread
        * Returns ENETUNREACH if no local NIC found to reach @to.
        */
       ssize_t sendto(const void* buf, size_t len, int flags,
-         const struct sockaddr* to, socklen_t tolen)
+         sockaddr* to)
       {
          const std::lock_guard<Mutex> lock(mutex);
-         struct in_addr a = reinterpret_cast<const struct sockaddr_in*>(to)->sin_addr;
-         std::shared_ptr<StandardSocket> s = findSenderSockUnlocked(a);
+         SocketAddress addr(to);
+         std::shared_ptr<StandardSocket> s = findSenderSockUnlocked(addr.addr);
          if (s == nullptr)
             return ENETUNREACH;
-         return s->sendto(buf, len, flags, to, tolen);
+         return s->sendto(buf, len, flags, &addr);
       }
 
       /**
        * Returns ENETUNREACH if no local NIC found to reach @ipAddr.
        */
-      ssize_t sendto(const void *buf, size_t len, int flags,
-         struct in_addr ipAddr, unsigned short port)
+      ssize_t sendto(const void *buf, size_t len, int flags, const SocketAddress& ipAddr)
       {
          const std::lock_guard<Mutex> lock(mutex);
-         std::shared_ptr<StandardSocket> s = findSenderSockUnlocked(ipAddr);
+         std::shared_ptr<StandardSocket> s = findSenderSockUnlocked(ipAddr.addr);
          if (s == nullptr)
             return ENETUNREACH;
-         return s->sendto(buf, len, flags, ipAddr, port);
+         if (s->getFamily() == AF_INET && !ipAddr.addr.isIPv4())
+            // Skip this address if it's ipv6 and the socket is in ipv4 fallback mode
+            return EAFNOSUPPORT;
+         return s->sendto(buf, len, flags, &ipAddr);
       }
 
       // getters & setters
@@ -144,7 +143,7 @@ class AbstractDatagramListener : public PThread
          this->recvTimeoutMS = recvTimeoutMS;
       }
 
-      unsigned short getUDPPort()
+      uint16_t getUDPPort()
       {
          return udpPort;
       }

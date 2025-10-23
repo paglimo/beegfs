@@ -1,9 +1,10 @@
 #include "DatagramListener.h"
+#include "common/net/sock/IPAddress.h"
 
 #include <common/net/message/NetMessageTypes.h>
 
 DatagramListener::DatagramListener(NetFilter* netFilter, NicAddressList& localNicList,
-   AcknowledgmentStore* ackStore, unsigned short udpPort, bool restrictOutboundInterfaces):
+   AcknowledgmentStore* ackStore, uint16_t udpPort, bool restrictOutboundInterfaces):
    AbstractDatagramListener("DGramLis", netFilter, localNicList, ackStore, udpPort,
       restrictOutboundInterfaces)
 {
@@ -13,10 +14,11 @@ DatagramListener::~DatagramListener()
 {
 }
 
-void DatagramListener::handleIncomingMsg(struct sockaddr_in* fromAddr, NetMessage* msg)
+void DatagramListener::handleIncomingMsg(struct sockaddr* fromAddr, NetMessage* msg)
 {
    HighResolutionStats stats; // currently ignored
-   std::shared_ptr<StandardSocket> sock = findSenderSock(fromAddr->sin_addr);
+   IPAddress fromIp(fromAddr);
+   std::shared_ptr<StandardSocket> sock = findSenderSock(fromIp);
    if (sock == nullptr)
    {
       log.log(Log_WARNING, "Could not handle incoming message: no socket");
@@ -52,7 +54,7 @@ void DatagramListener::handleIncomingMsg(struct sockaddr_in* fromAddr, NetMessag
       { // valid, but not within this context
          log.logErr(
             "Received a message that is invalid within the current context "
-            "from: " + Socket::ipaddrToStr(fromAddr->sin_addr) + "; "
+            "from: " + fromIp + "; "
             "type: " + messageType );
       } break;
    };

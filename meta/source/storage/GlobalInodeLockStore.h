@@ -2,11 +2,15 @@
 
 #include <common/Common.h>
 #include <storage/FileInode.h>
+#include <components/FileEventLogger.h>
 
-typedef std::map<std::string, FileInode*> GlobalInodeLockMap;
+
+typedef ObjectReferencer<FileInode*> GlobalInodeLockReferencer;
+typedef std::map<std::string, GlobalInodeLockReferencer*> GlobalInodeLockMap;
 typedef GlobalInodeLockMap::iterator GlobalInodeLockMapIter;
 
 typedef std::map<std::string, float> GlobalInodeTimestepMap;
+typedef GlobalInodeTimestepMap::iterator GlobalInodeTimestepMapIter;
 
 /**
  * Global store for file inodes which are locked for referencing.
@@ -17,27 +21,31 @@ typedef std::map<std::string, float> GlobalInodeTimestepMap;
  */
 class GlobalInodeLockStore
 {
-   friend class InodeFileStore;
-   friend class MetaStore;
-
    public:
       ~GlobalInodeLockStore()
       {
          this->clearLockStore();
       }
 
-      bool insertFileInode(EntryInfo* entryInfo);
-      bool releaseFileInode(const std::string& entryID);
-      bool lookupFileInode(EntryInfo* entryInfo);
+      bool insertFileInode(EntryInfo* entryInfo, FileEvent* fileEvent, bool increaseRefCount);
+      void releaseFileInode(const std::string& entryID); 
+      bool lookupFileInode(EntryInfo* entryInfo); 
+      FileInode* getFileInode(EntryInfo* entryInfo);
+      FileInode* getFileInodeUnreferenced(EntryInfo* entryInfo);
+      void clearLockStore(); 
+      void updateInodeLockTimesteps(unsigned int);
+
    private:
       GlobalInodeLockMap inodes;
       GlobalInodeTimestepMap inodeTimes;
-      FileInode* getFileInode(EntryInfo* entryInfo);
-      bool releaseInodeTime(const std::string& entryID);
+      GlobalInodeTimestepMapIter releaseInodeTimeUnlocked(const std::string& entryID);
+      GlobalInodeTimestepMapIter releaseFileInodeUnlocked(const std::string& entryID);
+      unsigned decreaseInodeRefCountUnlocked(GlobalInodeLockMapIter& iter);
+      FileInode* increaseInodeRefCountUnlocked(GlobalInodeLockMapIter& iter);
+      bool resetTimeCounterUnlocked(const std::string& entryID);
+   
 
       RWLock rwlock;
-      void clearLockStore();
-      void clearTimeStoreUnlocked();
+      void clearTimeStoreUnlocked(); 
 };
-
 

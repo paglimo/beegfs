@@ -1,7 +1,6 @@
 #pragma once
 
 #include <mutex>
-#include <set>
 #include <unordered_map>
 #include <vector>
 #include <common/net/sock/NetworkInterfaceCard.h>
@@ -10,8 +9,8 @@ DECLARE_NAMEDEXCEPTION(RoutingTableException, "RoutingTableException")
 
 
 class Destnet;
-typedef std::unordered_map<struct in_addr, Destnet, InAddrHash> DestnetMap;
-typedef std::unordered_map<struct in_addr, struct in_addr, InAddrHash> IpSourceMap;
+typedef std::unordered_map<IPAddress, Destnet, std::hash<IPAddress>> DestnetMap;
+typedef std::unordered_map<IPAddress, IPAddress, std::hash<IPAddress>> IpSourceMap;
 
 /**
  * Encapsulates lookup of a source address for a given destination
@@ -25,12 +24,12 @@ class RoutingTable
    private:
       friend class RoutingTableFactory;
       std::shared_ptr<const DestnetMap> destnets;
-      std::shared_ptr<const NetVector> noDefaultRouteNets;
+      std::shared_ptr<const NetFilter> noDefaultRouteNets;
 
       RoutingTable(std::shared_ptr<const DestnetMap> destnets,
-                   std::shared_ptr<const NetVector> noDefaultRouteNets);
+                   std::shared_ptr<const NetFilter> noDefaultRouteNets);
 
-      bool findSource(const Destnet* dn, const NicAddressList& nicList, struct in_addr& addr) const;
+      bool findSource(const Destnet* dn, const NicAddressList& nicList, IPAddress& addr) const;
 
    public:
 
@@ -47,7 +46,7 @@ class RoutingTable
        * @return true if a route was found for addr and it matches an element of
        *    nicList.
        */
-      BEEGFS_NODISCARD bool match(struct in_addr addr, const NicAddressList& nicList, struct in_addr& src) const;
+      BEEGFS_NODISCARD bool match(const IPAddress& addr, const NicAddressList& nicList, IPAddress& src) const;
 
       /**
        * Populate srcMap with the local IP address to use when communicating with IP addresses specified in
@@ -98,7 +97,7 @@ class RoutingTableFactory
        *
        * @return the instance
        */
-      RoutingTable create(std::shared_ptr<const NetVector> noDefaultRouteNets);
+      RoutingTable create(std::shared_ptr<const NetFilter> noDefaultRouteNets);
 
 };
 

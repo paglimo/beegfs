@@ -17,7 +17,7 @@ class BuddyResyncerBulkSyncSlave : public SyncSlaveBase
    friend class BuddyResyncJob;
 
    public:
-      BuddyResyncerBulkSyncSlave(BuddyResyncJob& parentJob, MetaSyncCandidateStore* syncCandidates, uint8_t slaveID,
+      BuddyResyncerBulkSyncSlave(BuddyResyncJob& BuddyResyncParentJob, MetaSyncCandidateStore* syncCandidates, uint8_t slaveID,
          const NumNodeID& buddyNodeID);
 
       struct Stats

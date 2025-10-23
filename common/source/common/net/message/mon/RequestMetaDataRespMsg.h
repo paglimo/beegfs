@@ -7,6 +7,10 @@
 class RequestMetaDataRespMsg : public NetMessageSerdes<RequestMetaDataRespMsg>
 {
    public:
+      struct MsgFlags {
+         static const unsigned USE_CLIENT_STATS_V2 = 1;
+      };
+
       /**
        * @param hostnameid it will get the hostname of server
        * @param nicList just a reference, so do not free it as long as you use this object!
@@ -26,6 +30,8 @@ class RequestMetaDataRespMsg : public NetMessageSerdes<RequestMetaDataRespMsg>
          this->directWorkListSize = DirectWorkListSize;
          this->sessionCount = sessionCount;
          this->statsList = statsList;
+
+         addMsgHeaderFeatureFlag(MsgFlags::USE_CLIENT_STATS_V2);
       }
 
       RequestMetaDataRespMsg() : BaseType(NETMSGTYPE_RequestMetaDataResp)
@@ -35,6 +41,8 @@ class RequestMetaDataRespMsg : public NetMessageSerdes<RequestMetaDataRespMsg>
          this->indirectWorkListSize = 0;
          this->directWorkListSize = 0;
          this->sessionCount = 0;
+
+         addMsgHeaderFeatureFlag(MsgFlags::USE_CLIENT_STATS_V2);
       }
 
       template<typename This, typename Ctx>
@@ -50,6 +58,10 @@ class RequestMetaDataRespMsg : public NetMessageSerdes<RequestMetaDataRespMsg>
             % obj->directWorkListSize
             % obj->sessionCount
             % serdes::backedPtr(obj->statsList, obj->parsed.statsList);
+      }
+
+      virtual unsigned getSupportedHeaderFeatureFlagsMask() const {
+         return MsgFlags::USE_CLIENT_STATS_V2;
       }
 
    private:

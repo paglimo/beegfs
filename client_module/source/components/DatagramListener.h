@@ -24,20 +24,18 @@ static inline DatagramListener* DatagramListener_construct(App* app, Node* local
 static inline void DatagramListener_uninit(DatagramListener* this);
 static inline void DatagramListener_destruct(DatagramListener* this);
 
-//extern ssize_t DatagramListener_broadcast(DatagramListener* this, void* buf, size_t len,
-//   int flags, unsigned short port); // no longer needed
 extern void DatagramListener_sendMsgToNode(DatagramListener* this, Node* node, NetMessage* msg);
 
 extern void __DatagramListener_run(Thread* this);
 extern void __DatagramListener_listenLoop(DatagramListener* this);
 
 extern void _DatagramListener_handleIncomingMsg(DatagramListener* this,
-   fhgfs_sockaddr_in* fromAddr, NetMessage* msg);
+   struct sockaddr_in6* fromAddr, NetMessage* msg);
 
 extern bool __DatagramListener_initSock(DatagramListener* this, unsigned short udpPort);
 extern void __DatagramListener_initBuffers(DatagramListener* this);
 extern bool __DatagramListener_isDGramFromLocalhost(DatagramListener* this,
-   fhgfs_sockaddr_in* fromAddr);
+   struct sockaddr_in6* fromAddr);
 
 
 struct DatagramListener
@@ -52,7 +50,7 @@ struct DatagramListener
    NetFilter* netFilter;
 
    StandardSocket* udpSock;
-   unsigned short udpPortNetByteOrder;
+   unsigned short udpPort;
    char* sendBuf;
    Mutex sendMutex;
 };
@@ -129,27 +127,19 @@ void DatagramListener_destruct(DatagramListener* this)
 
 
 static inline ssize_t DatagramListener_sendto_kernel(DatagramListener* this, void* buf, size_t len, int flags,
-   fhgfs_sockaddr_in* to)
+   struct sockaddr_in6* to)
 {
    ssize_t sendRes;
-
    Mutex_lock(&this->sendMutex);
-
    sendRes = Socket_sendto_kernel(&this->udpSock->pooledSocket.socket, buf, len, flags, to);
-
    Mutex_unlock(&this->sendMutex);
-
    return sendRes;
 }
 
 static inline ssize_t DatagramListener_sendtoIP_kernel(DatagramListener* this, void *buf, size_t len, int flags,
-   struct in_addr ipAddr, unsigned short port)
+   struct in6_addr ipAddr, unsigned short port)
 {
-   fhgfs_sockaddr_in peer = {
-      .addr = ipAddr,
-      .port = htons(port),
-   };
-
+   struct sockaddr_in6 peer = beegfs_make_sockaddr_in6(ipAddr, port);
    return DatagramListener_sendto_kernel(this, buf, len, flags, &peer);
 }
 

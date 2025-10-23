@@ -136,18 +136,13 @@ $(call define_if_matches, KERNEL_HAS_STRNICMP, "strnicmp", string.h)
 # Find out whether the kernel has BDI_CAP_MAP_COPY defined.
 $(call define_if_matches, KERNEL_HAS_BDI_CAP_MAP_COPY, "define BDI_CAP_MAP_COPY", backing-dev.h)
 
+# Note: added to 6.7 linux kernel
 # Find out whether xattr_handler** s_xattr in super_block is const.
 $(call define_if_matches, KERNEL_HAS_CONST_XATTR_CONST_PTR_HANDLER, \
    -F "const struct xattr_handler * const *s_xattr;", fs.h)
 
 $(call define_if_matches, KERNEL_HAS_CONST_XATTR_HANDLER, \
    -F "const struct xattr_handler **s_xattr;", fs.h)
-
-# Find out whether xattr_handler functions need a dentry* (otherwise they need an inode*).
-# Note: grepping for "(*set).struct..." instead of "(*set)(struct..." because make complains about
-#       the missing ")" otherwise.
-$(call define_if_matches, KERNEL_HAS_DENTRY_XATTR_HANDLER, \
-   "int (\*set).struct dentry \*dentry", xattr.h)
 
 # address_space.assoc_mapping went away in vanilla 3.8, but SLES11 backports that change
 $(call define_if_matches, KERNEL_HAS_ADDRSPACE_ASSOC_MAPPING, -F "assoc_mapping", fs.h)
@@ -162,7 +157,7 @@ $(call define_if_matches, KERNEL_HAS_SHOW_OPTIONS_DENTRY, -F "int (*show_options
 KERNEL_FEATURE_DETECTION += $(shell \
    grep -s -F "int (*get)" ${KSRCDIR_PRUNED_HEAD}/include/linux/xattr.h \
       | grep -q -s -F "const struct xattr_handler *" \
-      && echo "-DKERNEL_HAS_XATTR_HANDLER_PTR_ARG -DKERNEL_HAS_DENTRY_XATTR_HANDLER")
+      && echo "-DKERNEL_HAS_XATTR_HANDLER_PTR_ARG")
 
 # 4.5 introduces name in xattr_handler, which can be used instead of prefix
 KERNEL_FEATURE_DETECTION += $(shell \

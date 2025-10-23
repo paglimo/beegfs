@@ -12,9 +12,9 @@
 
 #include <dirent.h>
 
-BuddyResyncerBulkSyncSlave::BuddyResyncerBulkSyncSlave(BuddyResyncJob& parentJob,
+BuddyResyncerBulkSyncSlave::BuddyResyncerBulkSyncSlave(BuddyResyncJob& BuddyResyncParentJob,
       MetaSyncCandidateStore* syncCandidates, uint8_t slaveID, const NumNodeID& buddyNodeID) :
-   SyncSlaveBase("BuddyResyncerBulkSyncSlave_" + StringTk::uintToStr(slaveID), parentJob,
+   SyncSlaveBase("BuddyResyncerBulkSyncSlave_" + StringTk::uintToStr(slaveID), BuddyResyncParentJob,
          buddyNodeID),
    syncCandidates(syncCandidates)
 {
@@ -54,7 +54,7 @@ void BuddyResyncerBulkSyncSlave::syncLoop()
             continue;
 
          numDirErrors.increase();
-         parentJob->abort(false);
+         BuddyResyncParentJob->abort(false);
          return;
       }
 
@@ -88,7 +88,7 @@ void BuddyResyncerBulkSyncSlave::syncLoop()
       if (resyncRes != FhgfsOpsErr_SUCCESS)
       {
          numDirErrors.increase();
-         parentJob->abort(false);
+         BuddyResyncParentJob->abort(false);
          return;
       }
       else

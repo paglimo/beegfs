@@ -287,13 +287,30 @@ int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent
    sb->s_flags |= MS_NODIRATIME;
 #endif
 
-   if (Config_getSysXAttrsEnabled(cfg ) )
-      sb->s_xattr = fhgfs_xattr_handlers_noacl; // handle only user xattrs
+   if (Config_getSysACLsEnabled(cfg) && Config_getsysSELinuxEnabled(cfg))
+   {
+      sb->s_xattr = fhgfs_xattr_handlers;
+   }
+   else if (Config_getSysACLsEnabled(cfg))
+   {
+      sb->s_xattr = fhgfs_xattr_handlers_acl;
+   }
+   else if (Config_getsysSELinuxEnabled(cfg))
+   {
+      sb->s_xattr = fhgfs_xattr_handlers_selinux;
+   }
+   else if (Config_getSysXAttrsEnabled(cfg))
+   {
+      sb->s_xattr = fhgfs_xattr_handlers_noacl;
+   }
+   else
+   {
+       sb->s_xattr = NULL;
+   }
 
 #ifdef KERNEL_HAS_GET_ACL
    if (Config_getSysACLsEnabled(cfg) )
    {
-      sb->s_xattr = fhgfs_xattr_handlers; // replace with acl-capable xattr handlers
 #ifdef SB_POSIXACL
       sb->s_flags |= SB_POSIXACL;
 #else
@@ -359,7 +376,6 @@ int FhgfsOps_fillSuper(struct super_block* sb, void* rawMountOptions, int silent
     * useless revalidation of our root dentry. */
    sb->s_d_op = &fhgfs_dentry_ops;
 #endif // KERNEL_HAS_S_D_OP
-
    rootDentry->d_time = jiffies;
    sb->s_root = rootDentry;
 

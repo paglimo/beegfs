@@ -19,6 +19,10 @@
 
 #include <linux/semaphore.h>
 
+#ifdef BEEGFS_RDMA
+#include <rdma/ib_verbs.h>
+#endif
+
 
 #ifndef KERNEL_HAS_MEMDUP_USER
    extern void *memdup_user(const void __user *src, size_t len);
@@ -83,38 +87,6 @@ static inline int os_generic_permission(struct inode *inode, int mask)
       return generic_permission(inode, mask, NULL);
    #endif
 }
-
-#if defined(KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK)
-static inline void os_generic_fillattr(struct inode *inode, struct kstat *kstat, u32 request_mask)
-#else
-static inline void os_generic_fillattr(struct inode *inode, struct kstat *kstat)
-#endif
-{
-   #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-   #if defined(KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK)
-      generic_fillattr(&nop_mnt_idmap, request_mask, inode, kstat);
-   #else
-      generic_fillattr(&nop_mnt_idmap, inode, kstat);
-   #endif // KERNEL_HAS_GENERIC_FILLATTR_REQUEST_MASK
-   #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      generic_fillattr(&init_user_ns, inode, kstat);
-   #else
-      generic_fillattr(inode, kstat);
-   #endif
-}
-
-#ifdef KERNEL_HAS_SETATTR_PREPARE
-static inline int os_setattr_prepare(struct dentry *dentry, struct iattr *attr)
-{
-   #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-      return setattr_prepare(&nop_mnt_idmap, dentry, attr);
-   #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-      return setattr_prepare(&init_user_ns, dentry, attr);
-   #else
-      return setattr_prepare(dentry, attr);
-   #endif
-}
-#endif // KERNEL_HAS_SETATTR_PREPARE
 
 static inline bool os_inode_owner_or_capable(const struct inode *inode)
 {
@@ -238,18 +210,14 @@ static inline int os_posix_acl_to_xattr(const struct posix_acl* acl, void* buffe
 #if defined(KERNEL_HAS_SET_ACL) || defined(KERNEL_HAS_SET_ACL_DENTRY)
 static inline int os_posix_acl_chmod(struct dentry *dentry, umode_t mode)
 {
-
 #if defined(KERNEL_HAS_IDMAPPED_MOUNTS)
-   return posix_acl_chmod(&nop_mnt_idmap, dentry, mode);
-
+    return posix_acl_chmod(&nop_mnt_idmap, dentry, mode);
 #elif defined(KERNEL_HAS_POSIX_ACL_CHMOD_NS_DENTRY)
-   return posix_acl_chmod(&init_user_ns, dentry, mode);
-
+    return posix_acl_chmod(&init_user_ns, dentry, mode);
 #elif defined(KERNEL_HAS_USER_NS_MOUNTS)
-   return posix_acl_chmod(&init_user_ns, dentry->d_inode, mode);
-
+    return posix_acl_chmod(&init_user_ns, dentry->d_inode, mode);
 #else
-   return posix_acl_chmod(dentry->d_inode, mode);
+    return posix_acl_chmod(dentry->d_inode, mode);
 #endif
 }
 #endif // KERNEL_HAS_SET_ACL || KERNEL_HAS_SET_ACL_DENTRY
@@ -392,5 +360,19 @@ static inline void os_inode_unlock(struct inode* inode)
 #  define os_access_ok(type, addr, size) access_ok(addr, size)
 #endif
 
+/* ibdev_to_node was moved from net/rds/ib.h to rdma/ib_verbs.h in Linux 5.15 */
+#if defined(BEEGFS_RDMA) && !defined(KERNEL_HAS_IBDEV_TO_NODE)
+/**
+ * ibdev_to_node - return the NUMA node for a given ib_device
+ * @dev:	device to get the NUMA node for.
+ */
+static inline int ibdev_to_node(struct ib_device *ibdev)
+{
+	struct device *parent = ibdev->dev.parent;
+	if (!parent)
+		return NUMA_NO_NODE;
+	return dev_to_node(parent);
+}
+#endif
 
 #endif /* OSCOMPAT_H_ */

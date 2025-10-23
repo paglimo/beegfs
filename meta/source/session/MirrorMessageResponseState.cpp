@@ -12,6 +12,7 @@
 #include <net/message/storage/attribs/SetDirPatternMsgEx.h>
 #include <net/message/storage/attribs/SetXAttrMsgEx.h>
 #include <net/message/storage/attribs/UpdateDirParentMsgEx.h>
+#include <net/message/storage/chunkbalancing/UpdateStripePatternMsgEx.h>
 #include <net/message/storage/creating/HardlinkMsgEx.h>
 #include <net/message/storage/creating/MkDirMsgEx.h>
 #include <net/message/storage/creating/MkFileMsgEx.h>
@@ -46,31 +47,33 @@ std::unique_ptr<MirroredMessageResponseState> MirroredMessageResponseState::dese
 
    switch (tag)
    {
-      HANDLE_TAG(NETMSGTYPE_OpenFile,          OpenFileMsgEx)
-      HANDLE_TAG(NETMSGTYPE_CloseFile,         CloseFileMsgEx)
-      HANDLE_TAG(NETMSGTYPE_TruncFile,         TruncFileMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MkFileWithPattern, MkFileWithPatternMsgEx)
-      HANDLE_TAG(NETMSGTYPE_Hardlink,          HardlinkMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MkLocalDir,        MkLocalDirMsgEx)
-      HANDLE_TAG(NETMSGTYPE_UnlinkFile,        UnlinkFileMsgEx)
-      HANDLE_TAG(NETMSGTYPE_RmLocalDir,        RmLocalDirMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MkDir,             MkDirMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MkFile,            MkFileMsgEx)
-      HANDLE_TAG(NETMSGTYPE_RmDir,             RmDirMsgEx)
-      HANDLE_TAG(NETMSGTYPE_UpdateDirParent,   UpdateDirParentMsgEx)
-      HANDLE_TAG(NETMSGTYPE_RemoveXAttr,       RemoveXAttrMsgEx)
-      HANDLE_TAG(NETMSGTYPE_SetXAttr,          SetXAttrMsgEx)
-      HANDLE_TAG(NETMSGTYPE_SetDirPattern,     SetDirPatternMsgEx)
-      HANDLE_TAG(NETMSGTYPE_SetAttr,           SetAttrMsgEx)
-      HANDLE_TAG(NETMSGTYPE_RefreshEntryInfo,  RefreshEntryInfoMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MovingFileInsert,  MovingFileInsertMsgEx)
-      HANDLE_TAG(NETMSGTYPE_MovingDirInsert,   MovingDirInsertMsgEx)
-      HANDLE_TAG(NETMSGTYPE_Rename,            RenameV2MsgEx)
-      HANDLE_TAG(NETMSGTYPE_LookupIntent,      LookupIntentMsgEx)
-      HANDLE_TAG(NETMSGTYPE_AckNotify,         AckNotifiyMsgEx)
-      HANDLE_TAG(NETMSGTYPE_FLockEntry,        FLockEntryMsgEx)
-      HANDLE_TAG(NETMSGTYPE_FLockRange,        FLockRangeMsgEx)
-      HANDLE_TAG(NETMSGTYPE_BumpFileVersion,   BumpFileVersionMsgEx)
+      HANDLE_TAG(NETMSGTYPE_OpenFile,            OpenFileMsgEx)
+      HANDLE_TAG(NETMSGTYPE_CloseFile,           CloseFileMsgEx)
+      HANDLE_TAG(NETMSGTYPE_TruncFile,           TruncFileMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MkFileWithPattern,   MkFileWithPatternMsgEx)
+      HANDLE_TAG(NETMSGTYPE_Hardlink,            HardlinkMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MkLocalDir,          MkLocalDirMsgEx)
+      HANDLE_TAG(NETMSGTYPE_UnlinkFile,          UnlinkFileMsgEx)
+      HANDLE_TAG(NETMSGTYPE_RmLocalDir,          RmLocalDirMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MkDir,               MkDirMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MkFile,              MkFileMsgEx)
+      HANDLE_TAG(NETMSGTYPE_RmDir,               RmDirMsgEx)
+      HANDLE_TAG(NETMSGTYPE_UpdateDirParent,     UpdateDirParentMsgEx)
+      HANDLE_TAG(NETMSGTYPE_RemoveXAttr,         RemoveXAttrMsgEx)
+      HANDLE_TAG(NETMSGTYPE_SetXAttr,            SetXAttrMsgEx)
+      HANDLE_TAG(NETMSGTYPE_SetDirPattern,       SetDirPatternMsgEx)
+      HANDLE_TAG(NETMSGTYPE_SetAttr,             SetAttrMsgEx)
+      HANDLE_TAG(NETMSGTYPE_RefreshEntryInfo,    RefreshEntryInfoMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MovingFileInsert,    MovingFileInsertMsgEx)
+      HANDLE_TAG(NETMSGTYPE_MovingDirInsert,     MovingDirInsertMsgEx)
+      HANDLE_TAG(NETMSGTYPE_Rename,              RenameV2MsgEx)
+      HANDLE_TAG(NETMSGTYPE_LookupIntent,        LookupIntentMsgEx)
+      HANDLE_TAG(NETMSGTYPE_AckNotify,           AckNotifiyMsgEx)
+      HANDLE_TAG(NETMSGTYPE_FLockEntry,          FLockEntryMsgEx)
+      HANDLE_TAG(NETMSGTYPE_FLockRange,          FLockRangeMsgEx)
+      HANDLE_TAG(NETMSGTYPE_BumpFileVersion,     BumpFileVersionMsgEx)
+      HANDLE_TAG(NETMSGTYPE_UpdateStripePattern, UpdateStripePatternMsgEx)
+
 
       default:
          LOG(MIRRORING, ERR, "bad mirror response state tag.", tag);

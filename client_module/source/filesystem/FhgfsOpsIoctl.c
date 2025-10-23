@@ -1113,7 +1113,7 @@ static long FhgfsOpsIoctl_pingNode(struct file *file, void __user *argp)
          ping.results.outPingTime[i - 1] = elapsed;
          ping.results.outTotalTime += elapsed;
          StringTk_strncpyTerminated(ping.results.outPingType[i - 1],
-            NIC_nicTypeToString(Socket_getSockType(sock)),
+            NIC_nicTypeToString(sock->sockType),
             sizeof(ping.results.outPingType[i - 1]));
       }
 

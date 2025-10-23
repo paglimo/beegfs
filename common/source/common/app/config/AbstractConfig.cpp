@@ -93,7 +93,8 @@ void AbstractConfig::loadDefaults(bool addDashes)
    configMapRedefine("connDisableAuthentication",  "false", addDashes);
    configMapRedefine("connTcpOnlyFilterFile",      "", addDashes);
    configMapRedefine("connRestrictOutboundInterfaces", "false", addDashes);
-   configMapRedefine("connNoDefaultRoute",         "0.0.0.0/0", addDashes);
+   configMapRedefine("connNoDefaultRoute",         "::/0", addDashes);
+   configMapRedefine("connDisableIPv6",            "false", addDashes);
 
    /* connMessagingTimeouts: default to zero, indicating that constants
     * specified in Common.h are used.
@@ -229,6 +230,8 @@ void AbstractConfig::applyConfigMap(bool enableException, bool addDashes)
          else
             throw InvalidConfigException("The config argument '" + iter->first + "' is invalid");
       }
+      else if (testConfigMapKeyMatch(iter, "connDisableIPv6", addDashes))
+         connDisableIPv6 = StringTk::strToBool(iter->second);
       else if (testConfigMapKeyMatch(iter, "connRDMATimeouts", addDashes))
       {
          const size_t cfgValCount = 3;
@@ -510,5 +513,26 @@ void AbstractConfig::assignKeyIfNotZero(const StringMapIter& it, int& intVal, bo
    }
 
    intVal = tempVal;
+}
+
+// Load a list of IPNetworks from the given file if the file name is not empty
+NetFilter loadNetworkList(const std::string& file) {
+   if (file.empty())
+      return {};
+
+   StringList filterList;
+   ICommonConfig::loadStringListFile(file.c_str(), filterList);
+
+   NetFilter res;
+   for (const auto& f : filterList) {
+      try {
+         auto net = IPNetwork::fromCidr(f);
+         res.push_back(net);
+      } catch (std::exception &e) {
+         LOG(GENERAL, WARNING, e.what());
+      }
+   }
+
+   return res;
 }
 

@@ -14,6 +14,8 @@ class RDMASocket : public PooledSocket
          RDMASocket* (*rdma_socket_create)();
       };
 
+      RDMASocket() : PooledSocket() {}
+
       static bool isRDMAAvailable();
 
       static std::unique_ptr<RDMASocket> create();

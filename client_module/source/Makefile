@@ -8,13 +8,17 @@
 # string literal is wrapped in a pair of single quotes,
 # like this '"string literal"'.
 
-BEEGFS_FEATURE_DETECTION := $(shell $(dir $(lastword $(MAKEFILE_LIST)))/../build/feature-detect.sh $(KBUILD_CFLAGS) $(KBUILD_CPPFLAGS))
+BEEGFS_CLIENT_BUILDDIR := $(dir $(lastword $(MAKEFILE_LIST)))/../build
+
+BEEGFS_FEATURE_DETECTION := $(shell \
+	$(BEEGFS_CLIENT_BUILDDIR)/feature-detect-cacher.sh $(BEEGFS_CLIENT_BUILDDIR) -- \
+		$(BEEGFS_CLIENT_BUILDDIR)/feature-detect.sh $(KBUILD_CFLAGS) $(KBUILD_CPPFLAGS))
 
 ifneq ($(lastword $(BEEGFS_FEATURE_DETECTION)),--~~success~~--)
    $(error feature detection reported an error)
 else
    BEEGFS_FEATURE_DETECTION := $(filter-out --~~success~~--,$(BEEGFS_FEATURE_DETECTION))
-   $(info feature detection gives: $(BEEGFS_FEATURE_DETECTION))
+   $(info feature-detect.sh output: $(BEEGFS_FEATURE_DETECTION))
 endif
 
 # ccflags-y was introduced in 2.6.24, earlier kernels use EXTRA_CFLAGS for the same purpose
@@ -123,6 +127,8 @@ SOURCES := \
    common/toolkit/NodesTk.c \
    common/toolkit/SocketTk.c \
    common/toolkit/MetadataTk.c \
+   common/toolkit/NetFilter.c \
+   common/toolkit/NicAddressFilter.c \
    common/toolkit/StringTk.c \
    common/toolkit/ListTk.c \
    common/Types.c \

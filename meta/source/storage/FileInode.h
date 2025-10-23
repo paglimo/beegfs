@@ -302,6 +302,16 @@ class FileInode
          return retVal;
       }
 
+      /**
+       * Save meta-data to disk and increment meta version
+       */
+      bool updateInodeOnDiskIncrementVersion(EntryInfo* entryInfo, StripePattern* updatedStripePattern = NULL)
+      {
+         RWLockGuard lock(this->rwlock, SafeRWLock_WRITE); // L O C K
+         inodeDiskData.setMetaVersion(inodeDiskData.getMetaVersion() + 1);         
+         return storeUpdatedInodeUnlocked(entryInfo, updatedStripePattern);
+      }
+
       bool updateInodeChangeTime(EntryInfo* entryInfo)
       {
          UniqueRWLock lock(rwlock, SafeRWLock_WRITE);

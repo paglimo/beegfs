@@ -25,22 +25,18 @@ bool RefreshTargetStatesMsgEx_deserializePayload(NetMessage* this, DeserializeCt
 }
 
 bool __RefreshTargetStatesMsgEx_processIncoming(NetMessage* this, struct App* app,
-   fhgfs_sockaddr_in* fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
+   struct sockaddr_in6 *fromAddr, struct Socket* sock, char* respBuf, size_t bufLen)
 {
    Logger* log = App_getLogger(app);
    const char* logContext = "RefreshTargetStatesMsg incoming";
 
    RefreshTargetStatesMsgEx* thisCast = (RefreshTargetStatesMsgEx*)this;
 
-   const char* peer;
-
    InternodeSyncer* internodeSyncer = App_getInternodeSyncer(app);
    InternodeSyncer_setForceTargetStatesUpdate(internodeSyncer);
 
-   peer = fromAddr ?
-      SocketTk_ipaddrToStr(fromAddr->addr) : StringTk_strDup(Socket_getPeername(sock) );
-   LOG_DEBUG_FORMATTED(log, 4, logContext, "Received a RefreshTargetStatesMsg from: %s", peer);
-   kfree(peer);
+   LOG_DEBUG_FORMATTED(log, 4, logContext, "Received a RefreshTargetStatesMsg from: %s",
+      Socket_formatAddrOrPeername(fromAddr, sock));
 
    IGNORE_UNUSED_VARIABLE(log);
    IGNORE_UNUSED_VARIABLE(logContext);

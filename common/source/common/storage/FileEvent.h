@@ -21,6 +21,8 @@ enum class FileEventType
    OPEN_READ_WRITE = 15,
    LAST_WRITER_CLOSED = 16,
    OPEN_BLOCKED = 17,
+   STRIPE_PATTERN_CHANGED = 18,
+   INODE_LOCKED = 19,
 };
 
 template<>

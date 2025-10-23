@@ -64,6 +64,8 @@ class Config : public AbstractConfig
       unsigned          tuneNumResyncSlaves;
       bool              tuneMirrorTimestamps;
       unsigned          tuneDisposalGCPeriod; // sleep between disposal garbage collector runs [seconds], 0 = disabled
+      unsigned          tuneChunkBalanceQueueLimit;  //maximum number of items in chunk balancing queue
+      unsigned          tuneChunkBalanceLockingTimeLimit; // maximum time in seconds that a file can be locked for chunk balancing
 
       bool              quotaEarlyChownResponse; // true to send response before chunk files chown
       bool              quotaEnableEnforcement;
@@ -280,6 +282,10 @@ class Config : public AbstractConfig
       bool getTuneMirrorTimestamps() const { return tuneMirrorTimestamps; }
 
       unsigned getTuneDisposalGCPeriod() const { return tuneDisposalGCPeriod; }
+
+      unsigned getTuneChunkBalanceQueueLimit() const { return tuneChunkBalanceQueueLimit; }
+
+      unsigned getTuneChunkBalanceLockingTimeLimit() const { return tuneChunkBalanceLockingTimeLimit; }
 
       bool getSysAllowUserSetPattern() const { return sysAllowUserSetPattern; }
 

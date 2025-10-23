@@ -166,10 +166,10 @@
 #define NETMSGTYPE_SetFilePatternResp              2124
 #define NETMSGTYPE_CpChunkPaths                    2125
 #define NETMSGTYPE_CpChunkPathsResp                2126
-#define NETMSGTYPE_ChunkBalance                    2127
-#define NETMSGTYPE_ChunkBalanceResp                2128
-#define NETMSGTYPE_StripePatternUpdate             2129
-#define NETMSGTYPE_StripePatternUpdateResp         2130
+#define NETMSGTYPE_StartChunkBalance               2127
+#define NETMSGTYPE_StartChunkBalanceResp           2128
+#define NETMSGTYPE_UpdateStripePattern             2129
+#define NETMSGTYPE_UpdateStripePatternResp         2130
 #define NETMSGTYPE_SetFileState                    2131
 #define NETMSGTYPE_SetFileStateResp                2132
 

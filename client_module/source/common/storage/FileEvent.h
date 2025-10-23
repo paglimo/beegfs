@@ -24,6 +24,9 @@ enum FileEventType
    FileEventType_OPEN_READ_WRITE,
    FileEventType_LAST_WRITER_CLOSED,
    FileEventType_OPEN_BLOCKED,
+   FileEventType_STRIPE_PATTERN_CHANGED,
+   FileEventType_INODE_LOCKED,
+
 };
 
 struct FileEvent

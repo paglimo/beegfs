@@ -6,6 +6,7 @@
 #include <common/storage/StorageDefinitions.h>
 #include <common/storage/StorageTargetInfo.h>
 #include <common/nodes/TargetStateInfo.h>
+#include <common/nodes/TargetStateStore.h>
 #include <common/threading/RWLockGuard.h>
 #include <common/toolkit/PreallocatedFile.h>
 #include <common/components/TimerQueue.h>

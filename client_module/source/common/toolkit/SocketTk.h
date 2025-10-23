@@ -6,28 +6,18 @@
 #include <common/toolkit/Time.h>
 #include <linux/poll.h>
 
-#define SOCKETTK_ENDPOINTSTR_LEN       SOCKET_PEERNAME_LEN // size for _endpointAddrToStrNoAlloc()
-#define SOCKETTK_IPADDRSTR_LEN         (4*4)
-
 // forward declarations
 struct PollState;
 typedef struct PollState PollState;
 
 
-extern bool SocketTk_initOnce(void);
-extern void SocketTk_uninitOnce(void);
+bool SocketTk_initOnce(void);
+void SocketTk_uninitOnce(void);
 
-extern int SocketTk_poll(PollState* state, int timeoutMS);
+int SocketTk_poll(PollState* state, int timeoutMS);
 
-extern bool SocketTk_getHostByAddrStr(const char* hostAddr, struct in_addr* outIPAddr);
-extern struct in_addr SocketTk_in_aton(const char* hostAddr);
-
-extern char* SocketTk_ipaddrToStr(struct in_addr ipaddress);
-extern void SocketTk_ipaddrToStrNoAlloc(struct in_addr ipaddress, char* ipStr, size_t ipStrLen);
-extern char* SocketTk_endpointAddrToStr(struct in_addr ipaddress, unsigned short port);
-extern void SocketTk_endpointAddrToStrNoAlloc(char* buf, size_t bufLen,
-   struct in_addr ipaddress, unsigned short port);
-
+bool SocketTk_getHostByAddrStr(const char* hostAddr, struct in6_addr *outIPAddr);
+struct in6_addr SocketTk_in_aton(const char* hostAddr);
 
 struct PollState
 {
@@ -44,6 +34,27 @@ static inline void PollState_addSocket(PollState* state, Socket* socket, short e
    list_add_tail(&socket->poll._list, &state->list);
    socket->poll._events = events;
    socket->poll.revents = 0;
+}
+
+// if possible give buffer of length SOCKET_IPADDRSTR_LEN
+int SocketTk_ipaddrToStr(char *buf, size_t size, struct in6_addr ipaddress);
+int SocketTk_endpointToStr(char *buf, size_t size, struct in6_addr ipaddress, unsigned short port);
+
+static inline const char *Socket_formatAddrOrPeername(struct sockaddr_in6 *addr, Socket *sock)
+{
+   // Helper function for a few code locations that want to print either the
+   // source address, or the peername if there's no explicit source address
+   // (probably there was a message received via recv() instead of recvfrom(),
+   // so the source address is what the socket is connected to).
+   //
+   // We use the temp buffer in the socket to provide a simple API. No
+   // concurrency possible!
+   //
+   if (addr)
+      SocketTk_ipaddrToStr(sock->temp_format_buffer, sizeof sock->temp_format_buffer, addr->sin6_addr);
+   else
+      scnprintf(sock->temp_format_buffer, sizeof sock->temp_format_buffer, "%s", sock->peername);
+   return sock->temp_format_buffer;
 }
 
 #endif /*OPEN_SOCKETTK_H_*/

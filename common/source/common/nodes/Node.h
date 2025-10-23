@@ -120,14 +120,14 @@ class Node
          return connPool;
       }
 
-      unsigned short getPortUDP()
+      uint16_t getPortUDP()
       {
          const std::lock_guard<Mutex> lock(mutex);
 
          return this->portUDP;
       }
 
-      virtual unsigned short getPortTCP()
+      virtual uint16_t getPortTCP()
       {
          return this->connPool->getStreamPort();
       }

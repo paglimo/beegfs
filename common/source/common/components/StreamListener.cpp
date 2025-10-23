@@ -112,7 +112,7 @@ bool StreamListener::initSocks(unsigned short listenPort, NicListCapabilities* l
 
    try
    {
-      tcpListenSock = new StandardSocket(PF_INET, SOCK_STREAM);
+      tcpListenSock = new StandardSocket(SOCK_STREAM);
       tcpListenSock->setSoReuseAddr(true);
       int bufsize = cfg->getConnTCPRcvBufSize();
       if (bufsize > 0)
@@ -238,11 +238,11 @@ void StreamListener::onIncomingStandardConnection(StandardSocket* sock)
 {
    try
    {
-      struct sockaddr_in peerAddr;
+      struct sockaddr_storage peerAddr;
       socklen_t peerAddrLen = sizeof(peerAddr);
 
       std::unique_ptr<StandardSocket> acceptedSock(
-         (StandardSocket*)sock->accept( (struct sockaddr*)&peerAddr, &peerAddrLen));
+         (StandardSocket*)sock->accept(&peerAddr, &peerAddrLen));
 
       // (note: level Log_DEBUG to avoid spamming the log until we have log topics)
       log.log(Log_DEBUG, std::string("Accepted new connection from ") +
@@ -286,11 +286,11 @@ void StreamListener::onIncomingRDMAConnection(RDMASocket* sock)
    {
       try
       {
-         struct sockaddr_in peerAddr;
+         struct sockaddr_storage peerAddr;
          socklen_t peerAddrLen = sizeof(peerAddr);
 
          RDMASocket* acceptedSock =
-            (RDMASocket*)sock->accept( (struct sockaddr*)&peerAddr, &peerAddrLen);
+            (RDMASocket*)sock->accept(&peerAddr, &peerAddrLen);
 
          // note: RDMASocket::accept() might return NULL (which is not an error)
          if(!acceptedSock)

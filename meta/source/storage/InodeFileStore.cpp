@@ -66,81 +66,63 @@ FileInode* InodeFileStore::referenceLoadedFile(const std::string& entryID)
  *                       from MetaStore (global map)
  * @param checkLockStore - true in most cases, triggers check if file is locked due
  *                         to internal meta operations
- * @return FileInode* and FhgfsOpsErr. FileInode* NULL if no such file exists.
+ * @return A pair of FileInode* and FhgfsOpsErr. FileInode* NULL if no such file exists.
  */
 FileInodeRes InodeFileStore::referenceFileInode(EntryInfo* entryInfo, bool loadFromDisk, bool checkLockStore)
 {
    RWLockGuard lock(rwlock, SafeRWLock_WRITE);
-
-   if (checkLockStore) // check bool for internal lock store
-      return referenceFileInodeUnlocked(entryInfo, loadFromDisk);
-   else
-      return referenceFileInodeUnlockedIgnoreLocking(entryInfo, loadFromDisk);
+   return referenceFileInodeUnlocked(entryInfo, loadFromDisk, checkLockStore);
 }
 
 /**
  * Note: this->rwlock needs to be write locked
- * Note: We do not add a reference if isRename == true, but we set an exclusive flag and just
- *       return an unreferenced inode, which can be deleted anytime.
+ *
+ * @param entryInfo        entry information of the file.
+ * @param loadFromDisk     If true, load inode from disk if not already in memory.
+ * @param checkLockStore   If true, verify that the inode is not locked by internal meta operations.
+ *
+ * @return  A pair of FileInode* and the FhgfsOpsErr. FileInode* will be set to nullptr on failure.
  */
-FileInodeRes InodeFileStore::referenceFileInodeUnlocked(EntryInfo* entryInfo, bool loadFromDisk)
+FileInodeRes InodeFileStore::referenceFileInodeUnlocked(EntryInfo* entryInfo, bool loadFromDisk, bool checkLockStore)
 {
-   FileInode* inode = NULL;
+   FileInode* inode = nullptr;
    FhgfsOpsErr retVal = FhgfsOpsErr_PATHNOTEXISTS;
 
    InodeMapIter iter =  this->inodes.find(entryInfo->getEntryID() );
-   if(iter == this->inodes.end() && loadFromDisk)
-   { // not in map yet => check if in globalInodeLockStore
-      App* app = Program::getApp();
-      MetaStore* metaStore = app->getMetaStore();
-      GlobalInodeLockStore* inodeLockStore = metaStore->getInodeLockStore();
-      if (!inodeLockStore->lookupFileInode(entryInfo))
-      //not in globalInodeLockStore, try to load
+   if (iter == this->inodes.end() && loadFromDisk)
+   {  // inode not in store => attempt to load it
+      if (likely(checkLockStore))
       {
-         loadAndInsertFileInodeUnlocked(entryInfo, iter);
+         // checkLockStore=true: ensure inode isn't locked by internal operations
+         // (e.g., chunk balancing, access flag updates, HSM state transitions)
+         MetaStore* metaStore = Program::getApp()->getMetaStore();
+         GlobalInodeLockStore* inodeLockStore = metaStore->getInodeLockStore();
+         if (!inodeLockStore->lookupFileInode(entryInfo))
+         {  // inode is not locked => try to load it
+            loadAndInsertFileInodeUnlocked(entryInfo, iter);
+         }
+         else
+         {  // inode is locked => return error to caller
+            return {nullptr, FhgfsOpsErr_INODELOCKED};
+         }
       }
       else
-      {  //inode is in GlobalInodeLockStore
-         retVal =  FhgfsOpsErr_INODELOCKED;
+      {
+         // checkLockStore=false: skip lock check (used by internal meta operations)
+         loadAndInsertFileInodeUnlocked(entryInfo, iter);
       }
    }
-   if(iter != this->inodes.end() )
-   { // outInode exists
+
+   if (iter != this->inodes.end())
+   {  // inode exists in store
       inode = referenceFileInodeMapIterUnlocked(iter);
-      retVal = FhgfsOpsErr_SUCCESS;
-      return {inode, retVal};
+      if (inode)
+      {
+         retVal = FhgfsOpsErr_SUCCESS;
+      }
    }
 
    return {inode, retVal};
-}
-
-/**
- * Note: this->rwlock needs to be write locked
- * Note: We do not add a reference if isRename == true, but we set an exclusive flag and just
- *       return an unreferenced inode, which can be deleted anytime.
- * Note: Variation of referenceFileInodeUnlocked().
- *       Bypasses the check for locked files due to internal meta operations.
- */
-FileInodeRes InodeFileStore::referenceFileInodeUnlockedIgnoreLocking(EntryInfo* entryInfo, bool loadFromDisk)
-{
-   FileInode* inode = NULL;
-   FhgfsOpsErr retVal = FhgfsOpsErr_PATHNOTEXISTS;
-   FileInodeRes FileInodeResPair = { inode, retVal};
-   InodeMapIter iter =  this->inodes.find(entryInfo->getEntryID() );
-
-   if(iter == this->inodes.end() && loadFromDisk)
-   { // not in map yet => try to load it
-      loadAndInsertFileInodeUnlocked(entryInfo, iter);
-   }
-
-   if(iter != this->inodes.end() )
-   { // outInode exists
-      FileInodeResPair.first = referenceFileInodeMapIterUnlocked(iter);
-      FileInodeResPair.second = FhgfsOpsErr_SUCCESS;
-      return FileInodeResPair;
-   }
-
-   return FileInodeResPair;
 }
 
 /**
@@ -177,9 +159,20 @@ FhgfsOpsErr InodeFileStore::getUnreferencedInodeUnlocked(EntryInfo* entryInfo, F
          retVal = FhgfsOpsErr_SUCCESS;
    }
 
-   if (inode && inode->getNumHardlinks() > 1)
-   {  /* So the inode is not referenced and we set our exclusive lock. However, there are several
-       * hardlinks for this file. Currently only rename with a linkCount == 1 is supported! */
+   if (inode && !inode->getIsInlined())
+   {
+      // At this point, we hold an exclusive lock on an unreferenced inode. Historically, this
+      // lock was required to prevent concurrent operations (like open or lookup) from accessing
+      // the inode while a rename was in progress — ensuring the inode state remained stable until
+      // the operation completed.
+      // However, this locking requirement only applies to inlined inodes, which are tightly
+      // coupled with their dentries and directly affected by dentry-level changes. In contrast,
+      // non-inlined inodes — which gets de-inlined when the first hardlink is created — are stored
+      // independently from dentries on the disk. Even if the file now has only one remaining link,
+      // it may still be non-inlined due to prior hardlinks.
+      // Since rename operations only modify the dentry and not the inode itself, and because this
+      // inode is non-inlined and already isolated from dentry coupling, we no longer need to retain
+      // the exclusive lock. Instead, we simply trigger cleanup for this unreferenced inode.
       deleteUnreferencedInodeUnlocked(entryInfo->getEntryID() );
       inode = NULL;
       retVal = FhgfsOpsErr_INUSE;
@@ -431,28 +424,55 @@ FhgfsOpsErr InodeFileStore::moveRemoteBegin(EntryInfo* entryInfo, char* buf, siz
 /**
  * Finish the rename/move operation by deleting the inode object.
  */
-void InodeFileStore::moveRemoteComplete(const std::string& entryID)
+FhgfsOpsErr InodeFileStore::moveRemoteComplete(const std::string& entryID)
 {
    // moving succeeded => delete original
-
    RWLockGuard lock(rwlock, SafeRWLock_WRITE);
-
-   deleteUnreferencedInodeUnlocked(entryID);
+   return deleteUnreferencedInodeUnlocked(entryID);
 }
 
 /**
  * Finish the rename/move operation by deleting the inode object.
+ *
+ * @param entryID The ID of the inode to delete
+ * @return FhgfsOpsErr_SUCCESS if inode is deleted successfully,
+ *         FhgfsOpsErr_INUSE if inode is referenced by concurrent operations,
+ *         FhgfsOpsErr_PATHNOTEXISTS if inode not found in this store
  */
-void InodeFileStore::deleteUnreferencedInodeUnlocked(const std::string& entryID)
+FhgfsOpsErr InodeFileStore::deleteUnreferencedInodeUnlocked(const std::string& entryID)
 {
    InodeMapIter iter = inodes.find(entryID);
-   if(iter != inodes.end() )
-   { // file exists
+   if (iter != inodes.end() )
+   {  // inode exists
       FileInodeReferencer* fileRefer = iter->second;
+
+      // CRITICAL: Check for active inode references before deletion.
+      //
+      // This prevents a race condition involving rename(), hardlink(), and open():
+      // 1. Just before moveRemoteFileBegin(), a concurrent hardlink() operation makes
+      //    the inode non-inlined.
+      // 2. Since EntryInfo::getIsInlined() still returns true, we incorrectly load an
+      //    "unreferenced" inode into the parent directory's file store and acquire
+      //    an exclusive lock on it.
+      // 3. A concurrent open() operation references the inode in the global store
+      //    (since non-inlined inodes are always accessed there), setting refCount to 1.
+      // 4. moveRemoteComplete() calls this function to delete the inode from
+      //    the global store (which is always checked first), even though the "unreferenced"
+      //    inode is still present in the parent directory's file store.
+      // 5. Without this check, we would delete an actively used inode, causing use-after-free
+      //    errors during the subsequent close() operation, leading to a crash.
+      if (fileRefer->getRefCount())
+      {
+         LOG(GENERAL, WARNING, "Tried to delete unreferenced inode, but it is referenced.",
+            ("EntryID", entryID), ("RefCount", fileRefer->getRefCount() ) );
+         return FhgfsOpsErr_INUSE; // cannot free inode object, because it is referenced
+      }
 
       delete fileRefer;
       inodes.erase(entryID);
+      return FhgfsOpsErr_SUCCESS;
    }
+   return FhgfsOpsErr_PATHNOTEXISTS;
 }
 
 /**

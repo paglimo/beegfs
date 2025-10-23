@@ -25,6 +25,11 @@ typedef enum RDMAKeyType RDMAKeyType;
 enum CheckCapabilities;
 typedef enum CheckCapabilities CheckCapabilities;
 
+enum SELinuxRevalidateMode;
+typedef enum SELinuxRevalidateMode SELinuxRevalidateMode;
+enum ACLsRevalidate;
+typedef enum ACLsRevalidate ACLsRevalidate;
+
 enum EventLogMask
 {
    EventLogMask_NONE = 0,
@@ -71,6 +76,8 @@ const char* Config_inodeIDStyleNumToStr(InodeIDStyle inodeIDStyle);
 const char* Config_eventLogMaskToStr(enum EventLogMask mask);
 const char* Config_rdmaKeyTypeNumToStr(RDMAKeyType keyType);
 const char* Config_checkCapabilitiesTypeToStr(CheckCapabilities checkCapabilities);
+const char* Config_checkSELinuxRevalidateModeTypeToStr(SELinuxRevalidateMode checkSELinuxRevalidateMode);
+const char* Config_ACLsRevalidateToStr(ACLsRevalidate aclsRevalidate);
 
 // getters & setters
 static inline char* Config_getCfgFile(Config* this);
@@ -108,6 +115,7 @@ static inline unsigned Config_getConnMaxConcurrentAttempts(Config* this);
 static inline char* Config_getConnAuthFile(Config* this);
 static inline bool Config_getConnDisableAuthentication(Config* this);
 static inline uint64_t Config_getConnAuthHash(Config* this);
+static inline bool Config_getConnDisableIPv6(Config* this);
 static inline char* Config_getConnTcpOnlyFilterFile(Config* this);
 static inline char* Config_getTunePreferredMetaFile(Config* this);
 static inline char* Config_getTunePreferredStorageFile(Config* this);
@@ -148,7 +156,10 @@ static inline unsigned Config_getSysUpdateTargetStatesSecs(Config* this);
 static inline unsigned Config_getSysTargetOfflineTimeoutSecs(Config* this);
 static inline bool Config_getSysXAttrsEnabled(Config* this);
 static inline CheckCapabilities Config_getSysXAttrsCheckCapabilities (Config* this);
+static inline bool Config_getsysSELinuxEnabled(Config* this);
+static inline SELinuxRevalidateMode Config_getsysSELinuxRevalidate (Config* this);
 static inline bool Config_getSysACLsEnabled(Config* this);
+static inline ACLsRevalidate Config_getSysACLsRevalidate(Config* this);
 static inline bool Config_getSysXAttrsImplicitlyEnabled(Config* this);
 static inline bool Config_getSysBypassFileAccessCheckOnMeta(Config* this);
 
@@ -204,6 +215,25 @@ enum CheckCapabilities
    CHECKCAPABILITIES_Never
 };
 
+// SELinux cache revalidation mode strings
+#define SELINUX_REVALIDATE_ALWAYS_STR   "always"
+#define SELINUX_REVALIDATE_CACHE_STR    "cache"
+
+enum SELinuxRevalidateMode
+{
+   SELINUX_REVALIDATE_MODE_Always = 0,
+   SELINUX_REVALIDATE_MODE_Cache,
+};
+
+#define ACLSREVALIDATE_ALWAYS_STR      "always"
+#define ACLSREVALIDATE_CACHE_STR       "cache"
+
+enum ACLsRevalidate
+{
+   ACLSREVALIDATE_Always = 0,
+   ACLSREVALIDATE_Cache,
+};
+
 struct Config
 {
    // configurables
@@ -243,6 +273,7 @@ struct Config
    bool           connDisableAuthentication;
    uint64_t       connAuthHash; // implicitly set based on hash of connAuthFile contents
    char*          connTcpOnlyFilterFile; // allow only plain TCP (no RDMA etc) to these IPs
+   bool           connDisableIPv6;
 
    char*          connMessagingTimeouts;
    int            connMsgLongTimeout;
@@ -297,8 +328,11 @@ struct Config
    unsigned       sysTargetOfflineTimeoutSecs;
 
    bool     sysXAttrsEnabled;
-   CheckCapabilities   sysXAttrsCheckCapabilities;
+   CheckCapabilities       sysXAttrsCheckCapabilities;
+   bool     sysSELinuxEnabled;
+   SELinuxRevalidateMode   sysSELinuxRevalidate;
    bool     sysACLsEnabled;
+   ACLsRevalidate   sysACLsRevalidate;
    bool     sysXAttrsImplicitlyEnabled; // True when XAttrs have not been enabled in the config file
                                         // but have been enabled by __Config_initImplicitVals
                                         // because ACLs are enabled in the config and XAs are needed
@@ -498,6 +532,11 @@ uint64_t Config_getConnAuthHash(Config* this)
 char* Config_getConnTcpOnlyFilterFile(Config* this)
 {
    return this->connTcpOnlyFilterFile;
+}
+
+bool Config_getConnDisableIPv6(Config* this)
+{
+   return this->connDisableIPv6;
 }
 
 char* Config_getTunePreferredMetaFile(Config* this)
@@ -700,9 +739,24 @@ CheckCapabilities Config_getSysXAttrsCheckCapabilities(Config* this)
    return this->sysXAttrsCheckCapabilities;
 }
 
+SELinuxRevalidateMode Config_getsysSELinuxRevalidate(Config* this)
+{
+   return this->sysSELinuxRevalidate;
+}
+
+bool Config_getsysSELinuxEnabled(Config* this)
+{
+   return this->sysSELinuxEnabled;
+}
+
 bool Config_getSysACLsEnabled(Config* this)
 {
    return this->sysACLsEnabled;
+}
+
+ACLsRevalidate Config_getSysACLsRevalidate(Config* this)
+{
+   return this->sysACLsRevalidate;
 }
 
 bool Config_getSysXAttrsImplicitlyEnabled(Config* this)
