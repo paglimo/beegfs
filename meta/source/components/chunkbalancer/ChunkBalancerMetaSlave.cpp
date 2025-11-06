@@ -80,7 +80,7 @@ void ChunkBalancerMetaSlave::syncLoop()
             + std::to_string(destinationID)+ "; Idtype: "
             + std::to_string(idType));
 
-         bool lockRes = inodeLockStore->insertFileInode(entryInfo, fileEvent, true); //lock access to the inode
+         bool lockRes = inodeLockStore->insertFileInode(entryInfo, fileEvent, true); //lock access to the inode and increase reference count
          if (!lockRes)
          {
             LogContext(logContext).log(LogTopic_CHUNKBALANCING,  Log_WARNING, "Unable to lock file inode, chunk will not be balanced. chunkPath: " + relativePath + "; localTargetID: "

@@ -142,6 +142,11 @@ bool NicAddressFilter_isAllowed(NicAddressFilter* this, const NicAddress *nicAdd
    return NicAddressFilter_getPosition(this, nicAddr) < SIZE_MAX;
 }
 
+size_t NicAddressFilter_getNumFilterEntries(NicAddressFilter *this)
+{
+   return this->filterArrayLen;
+}
+
 static bool parse_NicAddressFilterEntry(const char *line, size_t len, struct NicAddressFilterEntry *out)
 {
    NicAddressFilterEntry filterEntry = {0};

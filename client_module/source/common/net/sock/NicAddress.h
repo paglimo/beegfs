@@ -16,8 +16,6 @@ typedef struct NicListCapabilities NicListCapabilities;
 
 struct ib_device;
 
-extern int NicAddress_preferenceComp(const NicAddress* lhs, const NicAddress* rhs);
-
 // inliners
 static inline bool NicAddress_equals(NicAddress* this, NicAddress* other);
 

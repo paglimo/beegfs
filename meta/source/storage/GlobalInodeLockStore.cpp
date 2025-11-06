@@ -5,7 +5,7 @@
 
 /**
  * 
- * Note: This does not increase the inode reference count, only adds the inode to the lock store. 
+ * Note: Increases referenceCount if increaseRefCount is set to True
  * * @return false if inode creation failed, true if file was inserted or if file is already in store
  */
 bool GlobalInodeLockStore::insertFileInode(EntryInfo* entryInfo, FileEvent* fileEvent = nullptr, bool increaseRefCount = true)

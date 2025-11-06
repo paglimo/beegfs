@@ -184,30 +184,30 @@ std::unique_ptr<MirroredMessageResponseState>  UpdateStripePatternMsgEx::execute
 }            
 bool UpdateStripePatternMsgEx::setStripePattern(EntryInfo* entryInfo, FileInode& inode, std::string& relativePath, uint16_t localTargetID, uint16_t destinationID)
 {
-   StripePattern* pattern = inode.getStripePattern();
-   UInt16Vector* stripeTargetIDs = pattern->getStripeTargetIDsModifyable();
-   if (stripeTargetIDs->empty() ||  (std::find(stripeTargetIDs->begin(), stripeTargetIDs->end(), localTargetID) == stripeTargetIDs->end()) )
-   {
-      return false;
-   }
    LogContext(__func__).log(LogTopic_CHUNKBALANCING,  Log_SPAM, 
       "Change chunk stripe pattern operation started. chunkPath: " + relativePath + "; localTargetID: "
       + std::to_string(localTargetID) + "; destinationTargetID: "
       + std::to_string(destinationID));
+   bool setPatternRes = inode.modifyStripePattern(localTargetID, destinationID);
+   if (!setPatternRes)
+   {
+      LogContext(__func__).log(LogTopic_CHUNKBALANCING,  Log_WARNING,
+         "Failed to update stripe pattern: chunkPath: " + relativePath + "; localTargetID: "
+            + std::to_string(localTargetID) + "; destinationTargetID: "
+            + std::to_string(destinationID));
+      return setPatternRes;
+   }
 
-   std::replace(stripeTargetIDs->begin(), stripeTargetIDs->end(), localTargetID, destinationID); //change chunk striping pattern to new destinationID
-
-   bool metaChangeRes = inode.updateInodeOnDiskIncrementVersion(entryInfo, pattern);
-   if (!metaChangeRes)
+   setPatternRes = inode.updateInodeOnDiskIncrementVersion(entryInfo, inode.getStripePattern());
+   if (!setPatternRes)
    {        
       LogContext(__func__).log(LogTopic_CHUNKBALANCING,  Log_WARNING, 
       "Failed to update stripe pattern on disk: chunkPath: " + relativePath + "; localTargetID: "
          + std::to_string(localTargetID) + "; destinationTargetID: "
          + std::to_string(destinationID));
-      return false;
    }
   
-   return true;   
+   return setPatternRes;
 }
 
 void UpdateStripePatternMsgEx::forwardToSecondary(ResponseContext& ctx)
@@ -227,22 +227,11 @@ bool UpdateStripePatternMsgEx::checkChunkOnStorageTarget(FileInode& inode, std::
          + std::to_string(targetID));
       return false; //do not update stripe pattern
    }
-   const UInt16Vector* stripeTargetIDs = inode.getStripePattern()->getStripeTargetIDs();
-   size_t numTargets      = stripeTargetIDs->size();
-   unsigned chunkSize     = inode.getStripePattern()->getChunkSize();
 
    int64_t fileSize = statData.getFileSize();
-   int64_t numChunks = (fileSize + chunkSize - 1) / chunkSize;
-   size_t activeCount = std::min<int64_t>(numChunks, numTargets);
-   std::set<uint16_t> activeTargets;
+   bool targetActiveRes = inode.checkTargetIsActiveInPattern(fileSize, targetID);
 
-   // determine which targets actually hold chunks
-   for (size_t i = 0; i < activeCount; ++i)
-   {
-      activeTargets.insert((*stripeTargetIDs)[i]);
-   }
-
-   if (fileSize < static_cast<int64_t>(chunkSize*numTargets) && activeTargets.find(targetID) == activeTargets.end())  //check if file is empty, symlink or otherwise smaller than expected
+   if (targetActiveRes)  //check if file is empty, symlink or otherwise smaller than expected
    {
       LogContext(__func__).log(LogTopic_CHUNKBALANCING,  Log_DEBUG, "Storage was unable to copy chunk to destination, file does not contain data on this target. "
          "Likely file is smaller than the stripe width. Proceeding to update stripe pattern anyway. chunkPath: "

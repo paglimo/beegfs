@@ -398,6 +398,51 @@ class FileInode
          return pattern;
       }
 
+      bool modifyStripePattern(uint16_t localTargetID, uint16_t destinationID)
+      {
+         UniqueRWLock lock(rwlock, SafeRWLock_WRITE);
+
+         StripePattern* pattern = this->getStripePatternUnlocked();
+         UInt16Vector* stripeTargetIDs = pattern->getStripeTargetIDsModifyable();
+         if (stripeTargetIDs->empty() ||  (std::find(stripeTargetIDs->begin(), stripeTargetIDs->end(), localTargetID) == stripeTargetIDs->end()) )
+         {
+            return false;
+         }
+         //change chunk striping pattern from localID to destinationID
+         std::replace(stripeTargetIDs->begin(), stripeTargetIDs->end(), localTargetID, destinationID);
+
+         return true;
+      }
+
+      /**
+       * Used to check if storage target in pattern actually holds a chunk 
+       * Used for cases when target is in pattern but chunk is not present (e.g. small files, special files)
+       *
+       * Note: Takes fileSize and targetID we want to check
+       * returns: true if target does not hold a chunk, false if chunk is on target
+       */
+      bool checkTargetIsActiveInPattern(int64_t fileSize, uint16_t targetID)
+      {
+         UniqueRWLock lock(rwlock, SafeRWLock_READ);
+
+         StripePattern* pattern = this->getStripePatternUnlocked();
+         const UInt16Vector* stripeTargetIDs = pattern->getStripeTargetIDs();
+         size_t numTargets      = stripeTargetIDs->size();
+         unsigned chunkSize     = pattern->getChunkSize();
+
+         int64_t numChunks = (fileSize + chunkSize - 1) / chunkSize;
+         size_t activeCount = std::min<int64_t>(numChunks, numTargets);
+         std::set<uint16_t> activeTargets;
+
+         // determine which targets actually hold chunks
+         for (size_t i = 0; i < activeCount; ++i)
+         {
+            activeTargets.insert((*stripeTargetIDs)[i]);
+         }
+
+         return (fileSize < static_cast<int64_t>(chunkSize*numTargets) && activeTargets.find(targetID) == activeTargets.end()); 
+      }
+
       void setFeatureFlags(unsigned flags)
       {
          SafeRWLock safeLock(&rwlock, SafeRWLock_WRITE);

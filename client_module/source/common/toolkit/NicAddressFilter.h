@@ -6,7 +6,6 @@
 
 typedef struct NicAddressFilter NicAddressFilter;
 
-bool NicAddressFilter_isContained(NicAddressFilter* this, struct in6_addr addr);
 bool NicAddressFilter_isAllowed(NicAddressFilter* this, const NicAddress *nicAddr);
 size_t NicAddressFilter_getNumFilterEntries(NicAddressFilter *this);
 size_t NicAddressFilter_getPosition(NicAddressFilter* this, const NicAddress *nicAddr);

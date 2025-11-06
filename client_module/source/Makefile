@@ -46,7 +46,6 @@ SOURCES := \
    net/filesystem/FhgfsOpsCommKitVec.c \
    common/system/System.c \
    common/net/sock/Socket.c \
-   common/net/sock/NicAddress.c \
    common/net/sock/NetworkInterfaceCard.c \
    common/net/sock/NicAddressList.c \
    common/net/sock/RDMASocket.c \

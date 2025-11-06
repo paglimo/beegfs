@@ -13,6 +13,7 @@
 struct nicaddr_sort_entry {
    NicAddressFilter *nicAddressFilter;
    NicAddress* addr;
+   int origIdx;
 };
 
 static int nicaddr_sort_comp(const void* l, const void* r)
@@ -22,13 +23,33 @@ static int nicaddr_sort_comp(const void* l, const void* r)
 
    NicAddressFilter *filter = lhs->nicAddressFilter;
 
-   size_t a = NicAddressFilter_getPosition(filter, lhs->addr);
-   size_t b = NicAddressFilter_getPosition(filter, rhs->addr);
+   // check if ordering is explicitly configured in a filter
+   {
+      size_t a = NicAddressFilter_getPosition(filter, lhs->addr);
+      size_t b = NicAddressFilter_getPosition(filter, rhs->addr);
 
-   if (a != b)
-      return (int) (a > b) - (int) (b > a);
+      if (a != b)
+         return (int) (a > b) - (int) (b > a);
+   }
 
-   return NicAddress_preferenceComp(lhs->addr, rhs->addr);
+   // prefer RDMA NICs
+   {
+      int a = (lhs->addr->nicType == NICADDRTYPE_RDMA);
+      int b = (rhs->addr->nicType == NICADDRTYPE_RDMA);
+      if (a != b)
+         return b - a;
+   }
+
+   // prefer IPv4 over IPv6
+   {
+      int a = ipv6_addr_v4mapped(&lhs->addr->ipAddr);
+      int b = ipv6_addr_v4mapped(&rhs->addr->ipAddr);
+      if (a != b)
+         return b - a;
+   }
+
+   // otherwise preserve original order
+   return lhs->origIdx - rhs->origIdx;
 }
 
 
@@ -73,6 +94,7 @@ void ListTk_cloneSortNicAddressList(NicAddressList* nicList, NicAddressList* nic
    NicAddressListIter listIter;
 
    struct nicaddr_sort_entry* list, *p;
+   int i = 0;
 
    /* i'm so sorry. we can't indicate failure here without a lot of work in App, and the
     * lists are usually tiny anyway. */
@@ -84,9 +106,11 @@ void ListTk_cloneSortNicAddressList(NicAddressList* nicList, NicAddressList* nic
    while (!NicAddressListIter_end(&listIter)) {
       p->nicAddressFilter = nicAddressFilter;
       p->addr = NicAddressListIter_value(&listIter);
+      p->origIdx = i;
 
       NicAddressListIter_next(&listIter);
       p++;
+      i++;
    }
 
    sort(list, NicAddressList_length(nicList), sizeof(*list), nicaddr_sort_comp, NULL);

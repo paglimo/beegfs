@@ -691,15 +691,26 @@ void App_cloneLocalRDMANicList(App* this, NicAddressList* rdmaNicList)
    Mutex_unlock(&this->nicListMutex); // U N L O C K
 }
 
+// TODO: we should probably also rename "findAllowedRDMAInterfaces" because, as explained, it's not
+// quite that.
 void App_findAllowedRDMAInterfaces(App* this, NicAddressList* nicList, NicAddressList* rdmaNicList)
 {
    const char* logContext = "App (find RDMA interfaces)";
    bool useRDMA = Config_getConnUseRDMA(this->cfg);
-   if (useRDMA)
+
+   // Special tweak: don't populate RDMA interfaces when the RDMA filter list is empty. This is
+   // different to how the regular interfaces filter is handled, where an empty filter means "all
+   // interfaces". The reason for the special handling is that possible RDMA interfaces are actually
+   // decided by the regular interfaces filter as well by default.  Only when rdmaNicAddressFilter
+   // is non-empty, then _all_ interfaces passing that filter will be used. This is different to how
+   // the regular interfaces filter is currently used, which tries the passing interfaces in order
+   // until a connection to the target node is successfully established.
+   if (useRDMA && (NicAddressFilter_getNumFilterEntries(this->rdmaNicAddressFilter) != 0))
    {
       NicAddressList tmpList;
 
       NicAddressList_init(&tmpList);
+
       NIC_findAll(this->rdmaNicAddressFilter, true, true, this->sockDomain, &tmpList);
 
       if(!NicAddressList_length(&tmpList) )
